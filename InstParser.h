@@ -213,7 +213,7 @@ namespace llvm {
             // which slot it occupies.
             void printInfoComment(const Value &V);
         public:
-            void setConstraint(CFG *cfg, State * &s, const Instruction *I, string func);
+            void setConstraint(CFG *cfg, State * &s, BasicBlock::iterator &it, string func);
             //Set the variableList
             //return the current variable's ID
             int setVariable(CFG* cfg, const Instruction *I, int ID, string func);

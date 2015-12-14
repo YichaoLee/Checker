@@ -26,7 +26,7 @@ enum Operator{
 };
 
 enum Op_m{
-    ADD,SUB,TAN,ATAN,ATAN2,SIN,ASIN,COS,ACOS,SQRT,POW,LOG,ABS,EXP,SINH,COSH,TANH,MUL,DIV,NONE,LOG10
+    ADD,SUB,TAN,ATAN,ATAN2,SIN,ASIN,COS,ACOS,SQRT,POW,LOG,ABS,EXP,SINH,COSH,TANH,MUL,DIV,NONE,LOG10,PTR
 };
 
 extern Operator getEnumOperator(string str);
@@ -196,6 +196,7 @@ class CFG{
 	map<string,vector<string>> CallLabel;
 	map<string, int> funcTime;
 	vector<string> retVar;
+	map<string, vector<unsigned>> arrayMap;
 	list<ParaVariable> callVar;
         
         string name;
@@ -224,6 +225,16 @@ class CFG{
                 return NULL;
             else
                 return l_it->second;};
+
+	vector<unsigned> getArrayAddr(string var){
+	    map<string, vector<unsigned>>::iterator l_it;
+            l_it=arrayMap.find(var);
+	    vector<unsigned> temp;
+            if(l_it==arrayMap.end())
+                return temp;
+            else
+                return l_it->second;
+	};
 
 	string getNodeName(int i);
         State* searchState(int stateID);

@@ -2683,12 +2683,14 @@ void NamedMDNode::dump() const { print(dbgs()); }
 
 /**HELP FUNCTIONS**/
 
-void InstParser::setConstraint(CFG* cfg, State* &s, const Instruction *I, string func){
+
+void InstParser::setConstraint(CFG* cfg, State* &s, BasicBlock::iterator &it, string func){
+    const Instruction* I = dyn_cast<Instruction>(it);
     string op = I->getOpcodeName();
 
     if(!cfg->callVar.empty()){
 	 const Function *f = I->getParent()?I->getParent()->getParent():nullptr;
-	for (Function::const_arg_iterator it = f->arg_begin(), E = f->arg_end();it != E; ++it) {
+	 for (Function::const_arg_iterator it = f->arg_begin(), E = f->arg_end();it != E; ++it) {
 		if(cfg->callVar.empty())
 			errs()<<func<<":-1:First Basicblock error 10086\n";
 		Constraint cTemp1;
@@ -2710,14 +2712,14 @@ void InstParser::setConstraint(CFG* cfg, State* &s, const Instruction *I, string
 		errs()<<func<<":1:First Basicblock error 10086\n";
     }
 
-    if(op == "alloca")
-        return;
+    if(op == "alloca"){
+	return;
+    }
     
     if(s->ContentRec==""){
         //firt time into the state
         if (MDNode *N = I->getMetadata("dbg")){
         DILocation Loc(N);//DILocation is in DebugInfo.h  
-        //unsigned Line = Loc.getLineNumber();  
           
         StringRef Dir = Loc.getDirectory();
         StringRef File = Loc.getFilename();
@@ -2744,19 +2746,19 @@ void InstParser::setConstraint(CFG* cfg, State* &s, const Instruction *I, string
         string s1=ss.str();
         s->ContentRec.append("\tLineNum:");
         s->ContentRec.append(s1.c_str());
+            }
         }
-    }
 
 
     if(op=="fcmp"){
     	unsigned n1 = I->getNumOperands();
 	
-		const FCmpInst *CI = dyn_cast<FCmpInst>(I);
+	const FCmpInst *CI = dyn_cast<FCmpInst>(I);
 				
     	ParaVariable pTemp1,pTemp2;
     	for(unsigned j = 0;j< n1; j ++){
       	    Value* v1 = I->getOperand(j);
-			string varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
+	    string varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
     	    string varName = func+"_"+varNum;
             if(j==0){
              	if(cfg->hasVariable(varName)){
@@ -2786,19 +2788,19 @@ void InstParser::setConstraint(CFG* cfg, State* &s, const Instruction *I, string
         string s_tmp1=getPredicateText_op(CI->getPredicate());
         cfg->c_tmp1.op=getEnumOperator(s_tmp1);                          
         string s_tmp2=getPredicateText_op_reverse(CI->getPredicate());
-        cfg->c_tmp2.op=getEnumOperator(s_tmp2);                      
+        cfg->c_tmp2.op=getEnumOperator(s_tmp2);        
     }
 
     else if(op=="icmp"){
     	unsigned n1 = I->getNumOperands();
 	
-		const CmpInst *CI = dyn_cast<CmpInst>(I);
+	const CmpInst *CI = dyn_cast<CmpInst>(I);
 		
 
     	ParaVariable pTemp1,pTemp2;
     	for(unsigned j = 0;j< n1; j ++){
       	    Value* v1 = I->getOperand(j);
-			string varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
+	    string varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
     	    string varName = func+"_"+varNum;
             if(j==0){
              	if(cfg->hasVariable(varName)){
@@ -2828,9 +2830,9 @@ void InstParser::setConstraint(CFG* cfg, State* &s, const Instruction *I, string
         string s_tmp1=getPredicateText_op(CI->getPredicate());
         cfg->c_tmp1.op=getEnumOperator(s_tmp1);                   
         string s_tmp2=getPredicateText_op_reverse(CI->getPredicate());
-        cfg->c_tmp2.op=getEnumOperator(s_tmp2);                        
+        cfg->c_tmp2.op=getEnumOperator(s_tmp2);      
     }
-    else if(op=="load"||op=="sitofp"||op=="fpext"||op=="fptosi"){
+    else if(op=="load"||op=="sitofp"||op=="fpext"||op=="fptosi"||op=="sext"){
         Constraint cTemp;
         unsigned n1 = I->getNumOperands();
         string c=func+"_"+getDesVarName(I); 
@@ -2864,7 +2866,7 @@ void InstParser::setConstraint(CFG* cfg, State* &s, const Instruction *I, string
     	Constraint cTemp;
     	unsigned n1 = I->getNumOperands();
     	ParaVariable pTemp1,pTemp2;
-		cTemp.op=ASSIGN;
+	cTemp.op=ASSIGN;
     	for(unsigned j = 0;j< n1; j ++){
         	Value* v1 = I->getOperand(j);
 		string varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
@@ -2892,7 +2894,8 @@ void InstParser::setConstraint(CFG* cfg, State* &s, const Instruction *I, string
     }
 
     else if(op=="add"||op=="fadd"||op=="sub"||op=="fsub"||op=="mul"||op=="fmul"||op=="sdiv"||op=="fdiv"){
-		Constraint cTemp;
+
+	Constraint cTemp;
         unsigned n1 = I->getNumOperands();
         string c=func+"_"+getDesVarName(I); 
         ParaVariable pTemp1,pTemp2;//,pTemp3;
@@ -2905,8 +2908,8 @@ void InstParser::setConstraint(CFG* cfg, State* &s, const Instruction *I, string
     	cTemp.op=ASSIGN;
         for(unsigned j = 0;j< n1; j ++){
         	Value* v1 = I->getOperand(j);
-			string varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
-			string varName = func+"_"+varNum;
+		string varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
+		string varName = func+"_"+varNum;
         	if(j==0){
             		if(cfg->hasVariable(varName))
                     		pTemp2.lvar = new Variable(varName,cfg->getVariable(varName)->ID,false);
@@ -2922,8 +2925,8 @@ void InstParser::setConstraint(CFG* cfg, State* &s, const Instruction *I, string
                 	}  
         	}   
      	}
-		pTemp2.op = get_m_Operator(op);
-		pTemp2.isExp = true;
+	pTemp2.op = get_m_Operator(op);
+	pTemp2.isExp = true;
      	cTemp.rpvList = pTemp2;
      	s->consList.push_back(cTemp);
 
@@ -2932,6 +2935,7 @@ void InstParser::setConstraint(CFG* cfg, State* &s, const Instruction *I, string
 
     else if(op == "br"){    
     //create the transition
+    //Transition *tr2=new Transition();
     	unsigned n1 = I->getNumOperands();
     	int t1,t2;
     	string toLabel1,toLabel2;
@@ -2988,7 +2992,7 @@ void InstParser::setConstraint(CFG* cfg, State* &s, const Instruction *I, string
 		                tr1->toState = s1;
 		            }
 		     	}
-				else if (j==2){
+			else if (j==2){
 		            toLabel2=func+"_"+varName;
 		            tr2->toLabel=toLabel2;
 		            State* s1 = cfg->getLabelState(toLabel2);
@@ -3003,7 +3007,7 @@ void InstParser::setConstraint(CFG* cfg, State* &s, const Instruction *I, string
 			    	tr1->guardList.push_back(cTemp1);
 			    	tr2->guardList.push_back(cTemp2);
 			    	s->transList.push_back(tr1);
-					s->transList.push_back(tr2);
+			   	s->transList.push_back(tr2);
 			    	cfg->transitionList.push_back(*tr1);//follow the transList
 			    	cfg->transitionList.push_back(*tr2);//follow the transList
 		    	}
@@ -3022,11 +3026,11 @@ void InstParser::setConstraint(CFG* cfg, State* &s, const Instruction *I, string
 		        tr1->toName = s1->name;
 		        tr1->toState = s1;
 		    }
-		    tr1->guardList.push_back(cTemp1);;
+		    tr1->guardList.push_back(cTemp1);
 		    s->transList.push_back(tr1);
 		    cfg->transitionList.push_back(*tr1);//follow the transList
 		}             
-		}
+	}
 
     }
     
@@ -3035,19 +3039,18 @@ void InstParser::setConstraint(CFG* cfg, State* &s, const Instruction *I, string
 	Constraint cTemp;
         unsigned n1 = I->getNumOperands();
 
-
         string c=func+"_"+getDesVarName(I); 
         ParaVariable pTemp1,pTemp2;
 
-		pTemp2.isExp = true;
+
         if(cfg->hasVariable(c))
         	pTemp1.rvar = new Variable(c,cfg->getVariable(c)->ID,false);//%0.%1,%2,.....
-		else{
-		}
+	else{
+	}
 
-		const CallInst *call = dyn_cast<CallInst>(I);
-		Function *f = call->getCalledFunction();
-		if(!f) 
+	const CallInst *call = dyn_cast<CallInst>(I);
+	Function *f = call->getCalledFunction();
+	if(!f) 
                 errs() << "Find a CallInst: "<< *I <<"\n" << "But can't find which function it calls.\n";
 
         string funcName = f->getName();
@@ -3109,29 +3112,31 @@ void InstParser::setConstraint(CFG* cfg, State* &s, const Instruction *I, string
 
 	}
 // **************************Deal with Function isDefined end****************************
-	else
+	else{
 		pTemp2.op = get_m_Operator(funcName);
+		pTemp2.isExp = true;
+	}
 	
 
     	cTemp.lpvList = pTemp1;
-    	cTemp.op=EQ;
+    	cTemp.op=ASSIGN;
 	if(pTemp2.op==NONE){
 		return;
 	}
 	
         if(n1==2){
         	Value* v1 = I->getOperand(0);
-			string varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
+		string varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
 	    	string varName = func+"_"+varNum;
             	if(cfg->hasVariable(varName))
                     	pTemp2.rvar = new Variable(varName,cfg->getVariable(varName)->ID,false);
-				else{
+		else{
                  	pTemp2.rvar = new Variable(varNum,-1,true);
                 }
 	}
 	else if(n1==3){
         	Value* v1 = I->getOperand(1);
-			string varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
+		string varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
 	    	string varName = func+"_"+varNum;
             	if(cfg->hasVariable(varName))
                     	pTemp2.rvar = new Variable(varName,cfg->getVariable(varName)->ID,false);
@@ -3207,21 +3212,126 @@ void InstParser::setConstraint(CFG* cfg, State* &s, const Instruction *I, string
 	s->transList.push_back(tr);
 	cfg->transitionList.push_back(*tr);
     }
+
+    else if(op=="getelementptr"){
+	string c=func+"_"+getDesVarName(I); 
+	unsigned n1 = I->getNumOperands();
+	Value* v1 = I->getOperand(0);
+	string varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
+	string varName = func+"_"+varNum+"_0";
+
+	Constraint cTemp;
+        ParaVariable pTemp1,pTemp2;
+	if(cfg->hasVariable(c))
+                pTemp1.rvar = new Variable(c,cfg->getVariable(c)->ID,false);
+	else{
+                errs()<<"2.Getelementptr: error 10086\t"<<c<<"\n";
+        }
+	if(cfg->hasVariable(varName))
+		pTemp2.lvar = new Variable(varName,cfg->getVariable(varName)->ID,false);	
+	else
+		errs()<<"3.Getelementptr: error 10086\t"<<varName<<"\n";
+	v1 = I->getOperand(n1-1);
+	varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
+	varName = func+"_"+varNum;
+	if(cfg->hasVariable(varName))
+		pTemp2.rvar = new Variable(varName,cfg->getVariable(varName)->ID,false);	
+	else
+		pTemp2.rvar = new Variable(varNum,-1,true);
+	pTemp2.op = PTR;
+	pTemp2.isExp = true;
+	cTemp.lpvList = pTemp1;
+	cTemp.rpvList = pTemp2;
+	cTemp.op = ASSIGN;
+	s->consList.push_back(cTemp);
+    }
     return;
 	
 }
 
 // nonlinear_bottom
 
-int InstParser::setVariable(CFG* cfg, const Instruction *I, int ID, string func){
-    string vName = func+"_"+getDesVarName(I);
-    if(vName != func+"_" && !cfg->hasVariable(vName)){
-        Variable var(vName, ID, false);
-        cfg->variableList.push_back(var);
-        ID ++;
+
+int setArrayVar(CFG* cfg, Type *Ty, int ID, string vName){
+    vector<unsigned> lvl;
+    while(const ArrayType *ATy = dyn_cast<ArrayType>(Ty)){				
+	lvl.push_back(ATy->getNumElements());
+	Ty = ATy->getElementType();
+    }
+
+    char ch = vName[vName.length()-1];
+    unsigned NumElements=1;
+    for(int i=0;i<lvl.size();i++)
+	NumElements *= lvl[i];
+    if(NumElements==1){
+	if(ch != '_' && !cfg->hasVariable(vName)){
+		Variable var(vName, ID, false);
+		cfg->variableList.push_back(var);
+		ID ++;
+	}
+    }
+    else{
+	if(ch != '_' && !cfg->hasVariable(vName)){
+		cfg->arrayMap.insert(pair<string, vector<unsigned> >(vName, lvl));
+		for(unsigned i=0;i<NumElements;i++){
+			string c = vName+"_"+intToString(i);
+			Variable var(c, ID, false);
+			cfg->variableList.push_back(var);
+			ID ++;
+		}
+	}
     }
     return ID;
 }
+
+
+int InstParser::setVariable(CFG* cfg, const Instruction *I, int ID, string func){
+     string op = I->getOpcodeName();
+     string vName = func+"_"+getDesVarName(I);
+     if(vName.size()<=0)
+	errs()<<"alloca: error 10086, no desname\n";
+     if(op == "alloca"){
+
+	const AllocaInst *AI = dyn_cast<AllocaInst>(I);
+	Type *Ty = AI->getAllocatedType();
+	if(const ArrayType *ATy = dyn_cast<ArrayType>(Ty)){	
+		return setArrayVar(cfg, Ty, ID, vName);
+	}
+	else if(const StructType *STy = dyn_cast<StructType>(Ty)){
+		unsigned NumElements = STy->getNumElements();
+		for (unsigned i = 0; i < NumElements; ++i){
+			string c = vName+"_"+intToString(i);
+			Type *nTy = STy->getElementType(i);
+			if(const ArrayType *ATy = dyn_cast<ArrayType>(nTy)){	
+				ID = setArrayVar(cfg, nTy, ID, c);
+			}
+			else if(!cfg->hasVariable(c)){
+				Variable var(c, ID, false);
+				cfg->variableList.push_back(var);
+				ID ++;
+			}
+		}
+	}
+	else{
+		if(!cfg->hasVariable(vName)){
+			Variable var(vName, ID, false);
+			cfg->variableList.push_back(var);
+			ID ++;
+		}
+	}
+    }
+    else{
+	if(vName != func+"_" && !cfg->hasVariable(vName)){
+		Variable var(vName, ID, false);
+		cfg->variableList.push_back(var);
+		ID ++;
+	}
+    }
+   
+    return ID; 
+}
+
+
 string InstParser::getDesVarName(const Instruction *I){
     string vName;
     if(I->hasName()){

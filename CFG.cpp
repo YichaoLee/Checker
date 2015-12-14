@@ -55,6 +55,7 @@ bool CFG::initial(){
 	transitionMap.clear();
 	transitionStrMap.clear();
 	this->counter_transition = 0;	
+
 	int count=1;
 	for(unsigned int i=0;i<stateList.size();i++){	
 		State* st=&stateList[i];
@@ -137,6 +138,7 @@ Transition* CFG::searchTransition(int transID) {
 }
 
 
+
 raw_ostream& operator << (raw_ostream& os,Op_m& object){
 	switch(object){
 		case ADD:errs()<<" + ";break;
@@ -159,6 +161,7 @@ raw_ostream& operator << (raw_ostream& os,Op_m& object){
 		case TANH:errs()<<" tanh ";break;
 		case MUL:errs()<<" * ";break;
 		case DIV:errs()<<" / ";break;
+		case PTR:errs()<<" getptr ";break;
 		case NONE:errs()<<" ";break;
 	}
 	return os;
@@ -168,6 +171,7 @@ raw_ostream& operator << (raw_ostream& os,Op_m& object){
 
 extern string get_m_Operator_str(Op_m op){
 	switch(op){
+		case PTR:return " getptr ";break;
 		case ADD:return " + ";break;
 		case SUB:return " - ";break;
 		case TAN:return " tan ";break;

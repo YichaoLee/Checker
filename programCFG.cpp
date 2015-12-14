@@ -264,7 +264,7 @@ ProgramCFG::ProgramCFG(Module &m):M(m){
     cfg->initial();
 
     finish=clock();
-    errs() << "BUILDCFG Time: \t" << convertToString(1000*(double)(finish-start)/CLOCKS_PER_SEC) << "ms";
+    errs() << "BUILDCFG Time: \t" << convertToString(1000*(double)(finish-start)/CLOCKS_PER_SEC) << "ms\n";
 /*
     //Draw the cfg Graph
     std::string errorInfo="";
@@ -277,12 +277,12 @@ ProgramCFG::ProgramCFG(Module &m):M(m){
     cfgWriter.writeGraph1("CFG",cfg);
 */
     int inputbound=bound;
-    int target=0;
+    vector<int> target;
     for(unsigned int i=0;i<cfg->stateList.size();i++){
     for(vector<int>::iterator it=cfg->stateList[i].locList.begin();it<cfg->stateList[i].locList.end();it++){
-
         if(*it==lineNo){
-            target=cfg->stateList[i].ID;
+            target.push_back(cfg->stateList[i].ID);
+	    errs()<<"target["<<target.size()<<"]:"<<cfg->stateList[i].name<<"\n";
             break;
         }
     }
@@ -295,20 +295,20 @@ ProgramCFG::ProgramCFG(Module &m):M(m){
     start=clock();
     verify.check(lineNo,check);
     finish=clock();
-    errs() << "bound:\t" << bound <<"\tlineNo:\t" << lineNo << "\tcheck:\t" << check << "\n";
+    errs() << "\nbound:\t" << bound <<"\tlineNo:\t" << lineNo << "\tcheck:\t" << check << "\n";
     errs() << "Time: \t" << convertToString(1000*(double)(finish-start)/CLOCKS_PER_SEC) << "ms \n";
 	ofstream SaveFile("/home/cfg/Documents/test_CFG_v3/benchmarkresult.txt", ios::app);
-	SaveFile<< "bound:\t" << bound <<"\tlineNo:\t" << lineNo << "\tcheck:\t" << check << "\n";
+	SaveFile<< "\nbound:\t" << bound <<"\tlineNo:\t" << lineNo << "\tcheck:\t" << check << "\n";
     	SaveFile<< "Time: \t" << convertToString(1000*(double)(finish-start)/CLOCKS_PER_SEC) << "ms \n\n";
 	SaveFile.close();
     }
     else {
-    cfg1=Add_target(cfg,target,check);
+    cfg1=Add_target(cfg,target[0],check);
     cfg1->initial();
-    int new_target;
+    vector<int> new_target;
     for(unsigned int i=0;i<cfg1->stateList.size();i++){
         if(cfg1->stateList[i].name=="q1")
-            new_target=cfg1->stateList[i].ID;
+            new_target.push_back(cfg1->stateList[i].ID);
     }
     BoundedVerification verify(cfg1,inputbound,new_target);
     clock_t start,finish;
@@ -325,8 +325,6 @@ std::map<BasicBlock*, color> *colors;
 
 std::map<Function*, std::vector<BasicBlock*> > *retBlocks;
 std::set<Function*> *targetFunctionList; //only use in search
-//unsigned id = 0;
-//unsigned n = 1;
 
 
 void ProgramCFG::findAllRetBlocks(Module &m){
@@ -392,9 +390,11 @@ void ProgramCFG::readBasicblock(BasicBlock *b, CFG *cfg, int time){
 	    string func = F->getName();
 	    if(time>0)
 		func = func+convertToString(time);
+//	    errs()<<"0:readBasicblock "<<func<<"\n";
 	    if(func=="main" && b==F->begin()){
 		cfg->initialState=s;
 		s->isInitial=true;
+//		errs()<<"cfg initialed:"<<s->name<<"\n";
             }
 	    else if(b==F->begin()){
 		for (Function::const_arg_iterator it = F->arg_begin(), E = F->arg_end();
@@ -414,14 +414,16 @@ void ProgramCFG::readBasicblock(BasicBlock *b, CFG *cfg, int time){
 		SlotTracker SlotTable(F);
                 const Module* M = F?F->getParent():nullptr;
                 InstParser W(OS, SlotTable, M, nullptr);
+//		errs()<<"InL:\n";W.printInstructionLine(*I);
                 //create the LabelMap
                 if(it == b->begin())
                     W.InsertCFGLabel(cfg,b,s, func); 
                 //create the variable table
                 counter_variable = W.setVariable(cfg, I, counter_variable, func);
                 //create the constraint table(NOT TRANSITION)
-                W.setConstraint(cfg, s, I, func);
+                W.setConstraint(cfg, s, it, func);
 		string op = I->getOpcodeName();
+//		errs()<<"1:readBasicblock "<<func<<":"<<op<<"\n";
 		if(op=="call"){
 			const CallInst *call = dyn_cast<CallInst>(I);
 			Function *f = call->getCalledFunction();
