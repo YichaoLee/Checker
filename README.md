@@ -1,19 +1,20 @@
 
-# Checker
-A BMC tool based on dReal
+Checker: A BMC tool based on dReal
+
 
 How to Build
 ==================
+Make sure the LLVM-3.5 is installed
 
 Copy the directory to llvm/lib/Transforms/
 
 Run Build_Checker.sh
 
-Checker in Checker/Bin is the binary
 
 How to Use
 ==================
+use Bin/Checker to verify the functions
 
-./Checker filename -l line -b bound
+./Checker filename -f funcName -b bound
 
  

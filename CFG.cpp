@@ -2,9 +2,9 @@
 using namespace std;
 int Transition::tran_id = 0;
 
-void CFG::InsertCFGState(int id,string name)
+void CFG::InsertCFGState(int id,string name,string funcName)
 {
-	State* tmp = new State(id,name);
+	State* tmp = new State(id,name,funcName);
 	this->stateMap.insert(pair<int,State*>(tmp->ID,tmp));
 }
 
@@ -31,6 +31,7 @@ void CFG::InsertCFGLabel(string Label, State *s){
                 {                   
                     transitionList[i].toName = s->name;
                     transitionList[i].toState = s;
+                    //errs()<<"SLOT%"<<Label<<"\tsName:\t"<<s->name<<"\n\n\n";
                 };
         }   
         for(unsigned int i=0;i<stateList.size();i++)
@@ -45,6 +46,7 @@ void CFG::InsertCFGLabel(string Label, State *s){
                 }
             }
         }
+        errs()<<"func\t"<<Label <<"\t"<< s->name<<"\n";
 }
 
 //stateList&transitionList----->Map
@@ -55,16 +57,27 @@ bool CFG::initial(){
 	transitionMap.clear();
 	transitionStrMap.clear();
 	this->counter_transition = 0;	
-
+/*
+	    for(int i=0;i<stateList.size();i++)
+		errs()<<stateList[i]<<"\n";
+	
+	    for(int i=0;i<transitionList.size();i++)
+		errs()<<transitionList[i]<<"\n";
+*/
 	int count=1;
 	for(unsigned int i=0;i<stateList.size();i++){	
 		State* st=&stateList[i];
+//		errs()<<st->ID<<"\t"<<st->nextS<<"\n";
 		st->transList.clear();
 		if(i==0){
+//			initialState=st;
 			st->ID=0;
+//			st->isInitial=true;
 		}
 		else
-			st->ID=count++;		
+			st->ID=count++;	
+		if(st->isInitial)
+			initialState=st;
 		stateMap.insert(pair<int, State*>(st->ID, st));
 		stateStrMap.insert(pair<string, State*>(st->name, st));
 		nameMap.insert(pair<int, string>(st->ID, st->name));
@@ -86,17 +99,19 @@ bool CFG::initial(){
 		transitionStrMap.insert(pair<string, Transition*>(tran->name, tran));
 		nameMap.insert(pair<int, string>(tran->ID, tran->name));
 		if(tran->toState==NULL){
-			errs()<<"error: can not find the tostate of the transition: "<<tran->name<<"\n";
+			errs()<<"warning: can not find the tostate of the transition: "<<tran->name<<"\n";
 			errs()<<tran->name<<" toLabel "<<tran->toLabel<<"\n";
-			return false;
+//			return false;
 		}
 	}
 	if(initialState==NULL){
-		errs()<<"error: there is no initial state\n";
+		errs()<<"Warning: there is no initial state.\n";
 		State* st=&stateList[0];
 		st->isInitial=true;
 		initialState=st;
+//		return false;
 	}
+//	errs()<<"cfg initialed~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n";
 	return true;	
 
 }
@@ -138,11 +153,14 @@ Transition* CFG::searchTransition(int transID) {
 }
 
 
-
 raw_ostream& operator << (raw_ostream& os,Op_m& object){
 	switch(object){
 		case ADD:errs()<<" + ";break;
 		case SUB:errs()<<" - ";break;
+		case AND:errs()<<" and ";break;
+		case NAND:errs()<<" nand ";break;
+		case OR:errs()<<" or ";break;
+		case XOR:errs()<<" xor ";break;
 		case TAN:errs()<<" tan ";break;
 		case ATAN:errs()<<" atan ";break;
 		case ATAN2:errs()<<" atan2 ";break;
@@ -161,7 +179,20 @@ raw_ostream& operator << (raw_ostream& os,Op_m& object){
 		case TANH:errs()<<" tanh ";break;
 		case MUL:errs()<<" * ";break;
 		case DIV:errs()<<" / ";break;
-		case PTR:errs()<<" getptr ";break;
+		case GETPTR:errs()<<" getptr ";break;
+		case ADDR:errs()<<" addr ";break;
+		case STORE:errs()<<" store ";break;
+		case LOAD:errs()<<" load ";break;
+		case ALLOCA:errs()<<" alloca ";break;
+		case lt:errs()<<" < ";break;
+		case le:errs()<<" <= ";break;
+		case gt:errs()<<" > ";break;
+		case ge:errs()<<" >= ";break;
+		case eq:errs()<<" == ";break;
+		case ne:errs()<<" != ";break;
+		case SREM:errs()<<" % ";break;
+		case ASHR:errs()<<" >> ";break;
+		case SHL:errs()<<" << ";break;
 		case NONE:errs()<<" ";break;
 	}
 	return os;
@@ -171,9 +202,13 @@ raw_ostream& operator << (raw_ostream& os,Op_m& object){
 
 extern string get_m_Operator_str(Op_m op){
 	switch(op){
-		case PTR:return " getptr ";break;
+		case GETPTR:return " getptr ";break;
 		case ADD:return " + ";break;
 		case SUB:return " - ";break;
+		case AND:return " and ";break;
+		case NAND:return " nand ";break;
+		case OR:return " or ";break;
+		case XOR:return " xor ";break;
 		case TAN:return " tan ";break;
 		case ATAN:return " atan ";break;
 		case ATAN2:return " atan2 ";break;
@@ -192,7 +227,30 @@ extern string get_m_Operator_str(Op_m op){
 		case TANH:return " tanh ";break;
 		case MUL:return " * ";break;
 		case DIV:return " / ";break;
+		case ADDR:return " addr ";break;
+		case STORE:return " store ";break;
+		case LOAD:return " load ";break;
+		case ALLOCA:return " alloca ";break;
+		case lt:return " < ";break;
+		case le:return " <= ";break;
+		case gt:return " > ";break;
+		case ge:return " >= ";break;
+		case eq:return " == ";break;
+		case ne:return " != ";break;
+		case SREM:return " % ";break;
+		case ASHR:return " >> ";break;
+		case SHL:return " << ";break;
 		case NONE:return " ";break;
+	}
+}
+
+extern string get_var_type(VarType type){
+	switch(type){
+		case INT: return " INT ";break;
+		case FP: return " FP ";break;
+		case PTR: return " PTR ";break;
+		case BOOL: return " BOOl ";break;
+		default: return " ERROR ";break;
 	}
 }
 
@@ -204,9 +262,10 @@ raw_ostream& operator << (raw_ostream& os, Variable& object){
 
 raw_ostream&  operator << (raw_ostream& os,ParaVariable& object){
 	if(object.lvar!=NULL)
-	errs()<<object.lvar->name<<object.op<<object.rvar->name;
-	else 
-	errs()<<object.op<<object.rvar->name;
+		errs()<<object.lvar->name;
+	errs()<<object.op;
+	if(object.rvar!=NULL)
+		errs()<<object.rvar->name;
 	return os;
 }
 
@@ -234,6 +293,7 @@ raw_ostream& operator << (raw_ostream& os,Constraint& object){
 
 raw_ostream& operator << (raw_ostream& os, Transition object){
 	errs()<<"Transition Name:"<<object.name<<" ID:"<<object.ID<<"\n";
+	errs()<<"Level:"<<object.level<<"\n";
 	errs()<<"ToLabel:"<<object.toLabel<<"\n";
 	errs()<<"from:"<<object.fromName<<" to:"<<object.toName<<"\nGuard:\n";
 	if(object.guardList.empty())
@@ -247,7 +307,8 @@ raw_ostream& operator << (raw_ostream& os, Transition object){
 }
 
 raw_ostream& operator << (raw_ostream& os, State object){
-	errs()<<"Location Name:"<<object.name<<" ID:"<<object.ID<<" nextS:"<<object.nextS<<"\n";
+	errs()<<"Location Name:"<<object.funcName<<" "<<object.name<<" ID:"<<object.ID<<" nextS:"<<object.nextS<<"\n";
+	errs()<<"Level:"<<object.level<<"\n";
 	if(object.isInitial)
 	  errs()<<"\nInitial location\n";
 	if(object.consList.empty())
@@ -266,7 +327,7 @@ void CFG::print(){
 	errs()<<"CFG:"<<name<<"\n";
 	for(unsigned int i=0;i<variableList.size();i++){
 		errs()<<"variable:"<<variableList[i].name;
-        errs() << ", " << variableList[i].ID << "\n";
+        errs() << ", " << variableList[i].ID <<" "<<get_var_type(variableList[i].type)<<"\n";
     }
 	for(unsigned int i=0;i<stateList.size();i++)
   		errs()<<stateList[i]<<"\n";
@@ -328,16 +389,42 @@ Op_m get_m_Operator(string str){
     	return TANH;
     else if(str=="mul"||str=="fmul")
     	return MUL;
-    else if(str=="sdiv"||str=="fdiv")
+    else if(str=="sdiv"||str=="fdiv"||str=="udiv")
     	return DIV;
     else if(str=="add"||str=="fadd")
     	return ADD;
     else if(str=="sub"||str=="fsub")
     	return SUB;
+    else if(str=="and")
+    	return AND;
+    else if(str=="nand")
+    	return NAND;
+    else if(str=="or")
+    	return OR;
+    else if(str=="xor")
+    	return XOR;
     else if(str=="log10")
-	return LOG10;
+		return LOG10;
+	else if(str=="EQ")
+    	return eq;
+    else if(str=="LT")
+    	return lt;
+    else if(str=="LE")
+    	return le;
+    else if(str=="GE")
+    	return ge;
+    else if(str=="GT")
+    	return gt;
+    else if(str=="NE")
+    	return ne;
+    else if(str=="srem")
+    	return SREM;
+    else if(str=="ashr")
+    	return ASHR;
+    else if(str=="shl")
+    	return SHL;
     else
-	return NONE;
+		return NONE;
 }
 
 

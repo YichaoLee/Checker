@@ -23,6 +23,7 @@
 #include "llvm/IR/TypeFinder.h"
 #include "llvm/Support/FormattedStream.h"
 #include "CFG.h"
+#include "general.h"
 namespace llvm {
 
     class BasicBlock;
@@ -173,7 +174,7 @@ namespace llvm {
             /// Construct an InstParser with an external SlotTracker
             InstParser(formatted_raw_ostream &o, SlotTracker &Mac,
                     const Module *M, AssemblyAnnotationWriter *AAW);
-            void InsertCFGLabel(CFG* cfg,const BasicBlock *BB, State* s, string func);
+            bool InsertCFGLabel(CFG* cfg,const BasicBlock *BB, State* s, string func, string name, bool usename);
             /// Construct an InstParser with an internally allocated SlotTracker
             InstParser(formatted_raw_ostream &o, const Module *M,
                     AssemblyAnnotationWriter *AAW);
@@ -213,11 +214,16 @@ namespace llvm {
             // which slot it occupies.
             void printInfoComment(const Value &V);
         public:
-            void setConstraint(CFG *cfg, State * &s, BasicBlock::iterator &it, string func);
+            //set constraints based on IR
+            void setConstraint(CFG *cfg, State * &s, BasicBlock::iterator &it, string func, vector<int> &target, int bound);
             //Set the variableList
-            //return the current variable's ID
-            int setVariable(CFG* cfg, const Instruction *I, int ID, string func);
+            static void setVariable(CFG* cfg, State * s, Type *Ty, string name, bool initial=false);
             string getDesVarName(const Instruction *I);
+			//preprocess in CFG(e.g. check divided by 0 error)
+            void preprocess(CFG* cfg, State* &s, const Instruction* I, string func, unsigned Line, vector<int> &target);
+			//Set global-constant variable
+            string setGlobal(string name, Value *v1, CFG *cfg, State *s);
+			string setGlobalConstraint(string name, Constant *Initial, CFG *cfg, State *s);
     };
 
 } // namespace llvm

@@ -4,9 +4,6 @@
 #include "general.h"
 #include <stdio.h>
 #include <cstdlib>
-#include "minisat/core/Solver.h"
-#include "z3++.h"
-#include "MUSSAnalyzer.h"
 #include <sstream>
 #include <cstring>
 #include "opensmt_c.h"
@@ -33,82 +30,95 @@ class VarTable{
 private:
 	opensmt_context &ctx;
 	int var_num;
+	int alloca_num;
 	map<int, double> varVal;
 	map<int, int> alias;
-	map<int, int> ptr;
 	vector<opensmt_expr> x;
+	map<int, int> exprMap;
+	CFG *cfg;
 public:
-	VarTable(opensmt_context &c, int num):ctx(c), var_num(num){
-		for(unsigned i=0;i<var_num;i++)
+	VarTable(opensmt_context &c, CFG *ha):ctx(c), cfg(ha){
+		int inputID=0;
+		var_num = 0;
+		alloca_num = 0;
+		for(int i=0; i<cfg->mainInput.size();i++)
+			errs()<<"VarTable initial "<<cfg->mainInput[i]<<"\t"<<cfg->variableList[cfg->mainInput[i]].name<<"\n";
+		for(unsigned i=0;i<cfg->variableList.size();i++)
 		{
-			x.push_back(opensmt_mk_unbounded_real_var(ctx, ("x_"+int2string(i)).c_str()));
+			Variable var =  cfg->variableList[i];
+			VarType type = var.type;
+
+			if(inputID<cfg->mainInput.size()&&cfg->mainInput[inputID]==(int)i){
+
+				if(type==FP)
+					x.push_back(opensmt_mk_real_var(ctx, var.name.c_str(), -100.0, 100.0));
+//				x.push_back(opensmt_mk_unbounded_real_var(ctx, var.name.c_str()));
+				else if(type==INT)
+					x.push_back(opensmt_mk_int_var(ctx, var.name.c_str(), -100.0, 100.0));
+				exprMap[i] = var_num;
+			    double const x_lb = opensmt_get_bound_lb(ctx, x[var_num]);
+			    double const x_ub = opensmt_get_bound_ub(ctx, x[var_num]);
+			    errs()<<var.name<<" = ["<<x_lb<<", "<<x_ub<<"]\n";
+				inputID++;
+				var_num++;
+			}
+			else if(type==FP){
+				x.push_back(opensmt_mk_unbounded_real_var(ctx, var.name.c_str()));
+				exprMap[i] = var_num; 
+				var_num++;
+			}
+			else if(type==INT){
+				x.push_back(opensmt_mk_unbounded_int_var(ctx, var.name.c_str()));
+				exprMap[i] = var_num; 
+				var_num++;
+			}
 		}
 	}
-	~VarTable(){varVal.clear();alias.clear();ptr.clear();}
-	void pushX(int ID){
-		setAlias(ID, var_num);
-		x.push_back(opensmt_mk_unbounded_real_var(ctx, ("x_"+int2string(var_num)).c_str()));
-		var_num++;
-	}
 
+	~VarTable(){varVal.clear();alias.clear();var_num=0;alloca_num=0;cfg=NULL;}
+
+	void setX(int ID, int time, VarType type){
+		int ID2 = exprMap[ID];
+		if(type==FP)
+			x[ID2] = opensmt_mk_unbounded_real_var(ctx, (cfg->variableList[ID].name+"_"+int2string(time)).c_str());
+		else if(type==INT)
+			x[ID2] = opensmt_mk_unbounded_int_var(ctx, (cfg->variableList[ID].name+"_"+int2string(time)).c_str());
+		else
+			errs()<<"SetX error 10086!!\n";
+	}
+	int alloca(){
+		alias[++alloca_num] = -2;
+		return alloca_num;
+	}
 	void setAlias(int ID1, int ID2){
-		int count = alias.count(ID2);
-		if(count == 0)
-			alias[ID1] = ID2;
-		else{
-			int id = alias[ID2];
-			if(id!=ID1)
-				alias[ID1] = id;
-			else
-				return;
-		}	
-		int id = alias[ID1];
-		count = varVal.count(id);
-		if(count == 1)
-			varVal[ID1] = varVal[id];
-		
-		
-		
+		alias[ID1] = ID2;
 	}
 	void setVal(int ID, double val){
-
 		varVal[ID] = val;
-
-		for(map<int, int>::iterator iter = alias.begin();iter!=alias.end();iter++){
-			if(iter->second == ID){
-				int aID = iter->first;
-				varVal[aID] = val;
-			}
-		}
-		
-		for(map<int, int>::iterator iter = ptr.begin();iter!=ptr.end();iter++){
-			if(iter->second == ID){
-				int aID = iter->first;
-				varVal[aID] = val;
-			}
-		}
-
 	}
-	void setPTR(int ID1, int ID2){
-		ptr[ID1] = ID2;
-		int count = varVal.count(ID1);
-		if(count)
-			varVal[ID2] = varVal[ID1];
-	}
+	
 	int getNum(){
 		return var_num;	
 	}
+	
 	opensmt_expr getX(int ID){
-		return x[ID];
+		int ID2 = exprMap[ID];
+		return x[ID2];
 	}
-	bool getalias(int ID, int &a){
+	
+	int getAlias(int ID){
 		int count = alias.count(ID);
+		int aliasID;
 		if(count){
-			a = alias[ID];
-			return true;
+			aliasID = alias[ID];
+			if(aliasID==-2)
+				errs()<<"GetAlias error1 "<<ID<<"\t"<<cfg->variableList[ID]<<"\n";
+			return aliasID;
 		}
-		a = ID;
-		return false;
+		else{
+			errs()<<"GetAlias error2 "<<ID<<"\t"<<cfg->variableList[ID]<<"\n";
+			return -1;
+		}
 	}
 	bool getVal(int ID, double &v){
 		int count = varVal.count(ID);
@@ -116,16 +126,9 @@ public:
 			v = varVal[ID];
 			return true;
 		}
-		return false;
-	}
-	bool getPTR(int ID, int &p){
-		int count = ptr.count(ID);
-		if(count){
-			p = ptr[ID];
-			return true;
+		else{
+			return false;
 		}
-		p = ID;
-		return false;
 	}
 	map<int, double> getValmap(){
 	   	return varVal;
@@ -133,8 +136,8 @@ public:
 	map<int, int> getAliasmap(){
 	   	return alias;
 	}
-	map<int, int> getPTRmap(){
-	   	return ptr;
+	CFG *getCFG(){
+		return cfg;
 	}
 };
 
@@ -142,53 +145,65 @@ class Verification{
 
 	string smt;
 	opensmt_context ctx;
+    VarTable *table;
+	double time;
 
-	void smt_push(string str);
-	void smt_declare(int ID);
-	void smt_assert(string str);
-	void get_constraint(Constraint *con, vector<opensmt_expr> &x, vector<int> &var, map<int, double> &value, bool repeat);
-	void get_constraint1(Constraint *con, VarTable *table, bool repeat);
-	string get_pvList(ParaVariable pvList);
-	string get_Variable(Variable *var);
+	opensmt_expr getExpr(Variable *v, bool &treat, double &val, VarTable *table);
+	opensmt_expr opensmt_mk_AND(opensmt_context ctx, opensmt_expr y, opensmt_expr z, string name, unsigned num);
+	opensmt_expr opensmt_mk_NAND(opensmt_context ctx, opensmt_expr y, opensmt_expr z, string name, unsigned num);
+	opensmt_expr opensmt_mk_OR(opensmt_context ctx, opensmt_expr y, opensmt_expr z, string name, unsigned num);
+	opensmt_expr opensmt_mk_XOR(opensmt_context ctx, opensmt_expr y, opensmt_expr z, string name, unsigned num);
+	opensmt_expr opensmt_mk_SREM(opensmt_context ctx, opensmt_expr y, opensmt_expr z, string name);
+	opensmt_expr opensmt_mk_ASHR(opensmt_context ctx, opensmt_expr y, int rr, string name, unsigned num);
+	opensmt_expr opensmt_mk_SHL(opensmt_context ctx, opensmt_expr y, int rr, string name, unsigned num);
+	opensmt_expr opensmt_mk_INT_cmp(opensmt_context ctx, opensmt_expr y, opensmt_expr z, Op_m pvop, string name);
+	int getCMP(int rl, int rr, Op_m pvop);
+	void get_constraint(Constraint *con, VarTable *table, int time);
 	void encode_path(CFG* ha, vector<int> patharray);
 
 	std::vector<IndexPair> index_cache; 
 	std::vector<IndexPair> core_index; 	
-	void clear(){index_cache.clear();core_index.clear();smt="";opensmt_del_context(ctx);ctx = opensmt_mk_context(qf_nra);}
+	void clear(){
+		index_cache.clear();
+		core_index.clear();
+		opensmt_reset(ctx);
+		//opensmt_del_context(ctx);
+		ctx = opensmt_mk_context(qf_nra);
+	}
 public:
 	Verification(){
 		opensmt_init();
-	    	ctx = opensmt_mk_context(qf_nra);
+	    ctx = opensmt_mk_context(qf_nra);
+		time=0;
 	}
 	bool check(CFG* ha, vector<int> path);
 	vector<IndexPair> get_core_index(){return core_index;}
 	~Verification(){opensmt_del_context(ctx);}
+    void print_sol(CFG* cfg, vector<int> x);
+	double getTime(){return time;}
 };
 
 class BoundedVerification{
 public:
-	BoundedVerification(CFG* aut,int bound,vector<int> target);
-	bool check(int line,string check);
+    BoundedVerification(CFG* aut,int bound,vector<int> target);
+	bool check(double &time,string check);
+	double getTime(){return verify.getTime();}
 	~BoundedVerification(){}
 private:
 	CFG* cfg;
+    bool result;
+    bool reachEnd;
 	int bound;
 	string reachPath;
 	string target_name;
-	int* traversedPath;
 	int num_of_path;
 	vector<int> target;
+    vector<int> path;
+    vector<int> witPath;
 	int stNum;
 	Verification verify;
-	Minisat::Solver s;
-	bool solve();
-	void encode_graph();
-	Minisat::Lit var(const int loop, const int ID);
-	void decode(int code, int& loop, int& ID);
 	string get_path_name(CFG *cfg,vector<int> path);
-	void block_path(int number,CFG *cfg,vector<int> path);
-	vector<int> decode_path();
-	void DFS(int intbound,int bound,int start,vector<int> end);
+	void DFS(int intbound,int bound,int start,int end);
 };
 
 

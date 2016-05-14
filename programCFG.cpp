@@ -10,14 +10,17 @@ using namespace llvm;
 //std::map<BasicBlock*, CFGNode>* ProgramCFG::nodes = NULL;
 int CFGNode::counter_state = 0;
 int CFGNode::counter_variable = 0;
-static int counter_state = 0;
-static int counter_variable = 0;
 
 
 //Command line argument
+/*
 cl::opt<int>
 lineNo("line",
         cl::desc("Line Number"), cl::value_desc("line"));
+*/
+cl::opt<string>
+funcname("func",
+        cl::desc("Function Name"), cl::value_desc("function name"));
 cl::opt<string>
 filename("name",
         cl::desc("File Name"), cl::value_desc("name"));
@@ -64,48 +67,33 @@ string convertToString(double d) {
  return "invalid conversion";  
 }
 
-CFG *Add_target(CFG *cfg,int target,string check){
-    CFG *cfg1=new CFG();
-    cfg1=cfg;
-    int len=check.length();
-    char x[len];
-    int numCheck=1;//budengshi geshu
-    for(int i=0;i<len;i++){
-        x[i]=check.at(i);
-        if(x[i]=='&')
-            numCheck++;
-    }
-    State *old_target=cfg->searchState(target);
-    State *new_target=new State(false,-1,"q1");
-    new_target->transList.clear();
-    new_target->consList.clear();
-    Transition *temp=new Transition(-2,"p1");
-    temp->fromState=old_target;
-    temp->fromName=cfg->getNodeName(target);
-    temp->toState=new_target;
-    temp->toName="q1";
-    temp->guardList.clear();
-    int a[numCheck+1];
-    int k=0;
-    a[k++]=0;
-    for(int i=0;i<len;i++)
-        if(x[i]=='&')
-            a[k++]=i+1;
-    a[numCheck]=len+1;
-    string b[numCheck];
-    for(int i=0;i<numCheck;i++)
-        b[i]=check.substr(a[i],a[i+1]-a[i]-1);
-/*
+string& trim(string &str, string::size_type pos = 0)
+{
+    static const string delim = " \t"; //删除空格或者tab字符
+    pos = str.find_first_of(delim, pos);
+    if (pos == string::npos)
+        return str;
+    return trim(str.erase(pos, 1));
+}
+
+
+ParaVariable StringToPara(string checkstr, string funcName){
+	ParaVariable ptemp;
+	return ptemp;
+}
+
+Constraint StringToConstraints(string checkstr, string funcName){
+
     Constraint ctemp;
-    ParaVariable ptemp;
-    for(int i=0;i<numCheck;i++){
+/*    ParaVariable ptemp;
+
 //      ctemp.lpvList.clear();
 //      ctemp.rpvList.clear();
         int opl=0;
-        int ltemp=a[i+1]-a[i]-1;
+        int ltemp=checkstr.length();
         char c[ltemp];
         for(int m=0;m<ltemp;m++){
-            c[m]=b[i].at(m);
+            c[m]=checkstr.at(m);
         }
         for(int m=0;m<ltemp;m++){
             if(if_op(c[m])){
@@ -135,7 +123,7 @@ CFG *Add_target(CFG *cfg,int target,string check){
             judgeOp=0;
         }
         if(c[opl]=='=' && !if_op(c[opl+1])){
-            ctemp.op=EQ;
+            ctemp.op=ASSIGN;
             judgeOp=0;
         }
         if(c[opl]=='=' && c[opl+1]=='='){
@@ -155,7 +143,7 @@ CFG *Add_target(CFG *cfg,int target,string check){
         }
         for(int i=0;i<opl;i++){
             if(if_as(d1[i])){
-                    if(i!=0){
+                if(i!=0){
                     ptemp.isNumber=pIsNumber;
                     if(!pIsNumber)
                         ptemp.var=cfg->getVariable(vName);
@@ -240,14 +228,57 @@ CFG *Add_target(CFG *cfg,int target,string check){
         ptemp.parameter=pParameter;
         ctemp.rpvList.push_back(ptemp);
         //errs()<<"ctemp="<<ctemp<<"\n";
+*/	
+	return ctemp;
+}
 
-        temp->guardList.push_back(ctemp);
+CFG *Add_target(CFG *cfg,int target,string checkstr){
+    check = trim(checkstr);
+    CFG *cfg1=new CFG();
+    cfg1=cfg;
+    int len=check.length();
+    char x[len];
+    int numCheck=1;//count of equations
+    for(int i=0;i<len;i++){
+        x[i]=check.at(i);
+        if(x[i]=='&')
+            numCheck++;
     }
-*/
+    State *old_target=cfg->searchState(target);
+    string funcName = old_target->funcName;
+    State *new_target=new State(false,-1,"q1",funcName);
+    new_target->transList.clear();
+    new_target->consList.clear();
+    Transition *temp=new Transition(-2,"p1");
+    temp->fromState=old_target;
+    temp->fromName=cfg->getNodeName(target);
+    temp->level=temp->fromState->level+1;
+    temp->toState=new_target;
+    new_target->level = temp->level;
+    temp->toName="q1";
+    temp->guardList.clear();
+    int a[numCheck+1];
+    int k=0;
+    a[k++]=0;
+    for(int i=0;i<len;i++)
+        if(x[i]=='&')
+            a[k++]=i+1;
+    a[numCheck]=len+1;
+    string b[numCheck];
+    for(int i=0;i<numCheck;i++)
+        b[i]=check.substr(a[i],a[i+1]-a[i]-1);
+
+    Constraint cTemp;
+    for(int i=0;i<numCheck;i++){
+	cTemp = StringToConstraints(b[i], funcName);
+	temp->guardList.push_back(cTemp);
+    }
+
     cfg1->stateList.push_back(*new_target);
     cfg1->transitionList.push_back(*temp);
     return cfg1;
 }
+
 ProgramCFG::ProgramCFG(Module &m):M(m){
 
     root = NULL;
@@ -256,68 +287,60 @@ ProgramCFG::ProgramCFG(Module &m):M(m){
     clock_t start,finish;
 
     start=clock();
-    errs() <<"START~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n";
+    errs() <<"START CHECK FUNCTION <"<<funcname<<">~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n";
     //Create the cfg Structure
     CFG* cfg = new CFG();
+    cfg->counter_state = 0;
+    cfg->counter_variable = 0;
+    cfg->counter_s_state = 0;
+    cfg->counter_state = 0;
     buildProgramCFG(m, cfg);
     CFG *cfg1=new CFG();
     cfg->initial();
 
     finish=clock();
-    errs() << "BUILDCFG Time: \t" << convertToString(1000*(double)(finish-start)/CLOCKS_PER_SEC) << "ms\n";
-/*
-    //Draw the cfg Graph
-    std::string errorInfo="";
-    raw_fd_ostream File("CFG.dot",errorInfo,sys::fs::F_Text);
-    if(!errorInfo.empty()){
-        errs() << "can't write file CFG.dot\n";
-        exit(-1); 
-    }
-    CFGWriter cfgWriter(this,File,true);
-    cfgWriter.writeGraph1("CFG",cfg);
-*/
+    double buildTime = 1000*(double)(finish-start)/CLOCKS_PER_SEC;
+    errs() << "BUILDCFG Time: \t" << convertToString(buildTime) << "ms\n";
+	
     int inputbound=bound;
-    vector<int> target;
-    for(unsigned int i=0;i<cfg->stateList.size();i++){
-    for(vector<int>::iterator it=cfg->stateList[i].locList.begin();it<cfg->stateList[i].locList.end();it++){
-        if(*it==lineNo){
-            target.push_back(cfg->stateList[i].ID);
-	    errs()<<"target["<<target.size()<<"]:"<<cfg->stateList[i].name<<"\n";
-            break;
-        }
-    }
-}
+    double dreal_time=0;
+
     if(check=="")
     {
-    //cfg->print();
-    BoundedVerification verify(cfg,inputbound,target);   
-    clock_t start,finish;
-    start=clock();
-    verify.check(lineNo,check);
-    finish=clock();
-    errs() << "\nbound:\t" << bound <<"\tlineNo:\t" << lineNo << "\tcheck:\t" << check << "\n";
-    errs() << "Time: \t" << convertToString(1000*(double)(finish-start)/CLOCKS_PER_SEC) << "ms \n";
-	ofstream SaveFile("/home/cfg/Documents/test_CFG_v3/benchmarkresult.txt", ios::app);
-	SaveFile<< "\nbound:\t" << bound <<"\tlineNo:\t" << lineNo << "\tcheck:\t" << check << "\n";
-    	SaveFile<< "Time: \t" << convertToString(1000*(double)(finish-start)/CLOCKS_PER_SEC) << "ms \n\n";
-	SaveFile.close();
+        clock_t start,finish;
+        start=clock();
+        BoundedVerification verify(cfg,inputbound,target);   
+        verify.check(dreal_time,check);
+        finish=clock();
     }
     else {
-    cfg1=Add_target(cfg,target[0],check);
-    cfg1->initial();
-    vector<int> new_target;
-    for(unsigned int i=0;i<cfg1->stateList.size();i++){
-        if(cfg1->stateList[i].name=="q1")
-            new_target.push_back(cfg1->stateList[i].ID);
+        cfg1=Add_target(cfg,target[0],check);
+        cfg1->initial();
+        vector<int> new_target;
+        for(unsigned int i=0;i<cfg1->stateList.size();i++){
+            if(cfg1->stateList[i].name.at(0)=='q')
+                new_target.push_back(cfg1->stateList[i].ID);
+        }
+        clock_t start,finish;
+        start=clock();
+        BoundedVerification verify(cfg1,inputbound,new_target);
+        verify.check(dreal_time,check);
+        finish=clock();
+    
     }
-    BoundedVerification verify(cfg1,inputbound,new_target);
-    clock_t start,finish;
-    start=clock();
-    verify.check(lineNo,check);
-    finish=clock();
-    errs() << "bound:\t" << bound <<"\tlineNo:\t" << lineNo << "\tcheck:\t" << check << "\n";
-    errs() << "Time: \t" << convertToString(1000*(double)(finish-start)/CLOCKS_PER_SEC) << "ms \n";
-    }
+    errs() << "bound:\t" << bound <<"\tfunctionName:\t" << funcname << "\tcheck:\t" << check << "\n";
+    errs() << "Time: \t" << convertToString(1000*(double)(finish-start)/CLOCKS_PER_SEC) << "s \n";
+
+    errs() << "BUILDCFG Time: \t" << convertToString(buildTime) << "ms\n";
+	errs() << "Dreal Time: \t" << convertToString(dreal_time/1000) << "s\n";
+	double mem_used_peak = memUsedPeak();
+	double cpu_time = cpuTime();
+	char mem_str[64];
+	if (mem_used_peak != 0) 
+		sprintf(mem_str, "Memory used: %.2f MB\n", mem_used_peak);
+	char time_str[64];
+	sprintf(time_str, "CPU Time: %g s\n", cpu_time);
+	errs()<<mem_str<<time_str;
 }
 
 enum color{WHITE,BLACK,GRAY};
@@ -330,133 +353,214 @@ std::set<Function*> *targetFunctionList; //only use in search
 void ProgramCFG::findAllRetBlocks(Module &m){
     for(Module::iterator f = m.begin(); f!= m.end(); f++){
         if(f->getName() == "main") continue;
-        //if(targetFunctionList->find(f) == targetFunctionList->end()) continue;//didn't find in target func list 
         for(Function::iterator bb = f->begin(); bb != f->end(); bb++){
             TerminatorInst *terminator = bb->getTerminator();
             if(isa<ReturnInst>(terminator) ){
-                //errs() <<"ret basicblock :in "<<f->getName()<<"\t"<<*terminator << "\n";
                 ((*retBlocks)[f]).push_back(bb);
-            }/*else if(isa<UnreachableInst>(terminator)) {
-            //errs()<<"hehe: "<<f->getName() <<"\t"<<*bb<<"\n";//bb contains exit ,abort or xalloc_die
-            }*/
+            }
         }
     }
+}
 
-    //errs() << (*retBlocks) << "\n";
+void  ProgramCFG::setFuncVariable(const Function *F,string func, CFG* cfg, bool initial){
+	for (Function::const_arg_iterator it = F->arg_begin(), E = F->arg_end();it != E; ++it) {
+		Type *Ty = it->getType();
+		if(initial){
+			string varNum = it->getName();
+			string varName = func+"_"+varNum;
+			
+			if(Ty->isPointerTy()){
+				Type *ETy = Ty->getPointerElementType();
+				int ID = cfg->counter_variable++;
+				Variable var(varName, ID, PTR);
+				cfg->variableList.push_back(var);
+				
+				InstParser::setVariable(cfg, NULL, ETy, varName, true);
+				
+			}
+			else{
+                VarType type;
+                if(Ty->isIntegerTy())
+                    type = INT;
+                else if(Ty->isFloatingPointTy())
+                    type = FP;
+                else
+                    errs()<<"0:programCFG.type error\n";
+				int ID = cfg->counter_variable++;
+				Variable var(varName, ID, type);
+				cfg->variableList.push_back(var);
+				cfg->mainInput.push_back(ID);
+			}
+		}
+		else{
+			int ID = cfg->counter_variable++;
+			string varNum = it->getName();
+			string varName = func+"_"+varNum;
+			
+            VarType type;
+			if(Ty->isPointerTy())
+				type = PTR;
+			else if(Ty->isIntegerTy())
+                type = INT;
+            else if(Ty->isFloatingPointTy())
+                type = FP;
+            else
+                errs()<<"1:programCFG.type error\n";
 
+			if(!cfg->hasVariable(varName)){
+				Variable var(varName, ID, type);
+				cfg->variableList.push_back(var);
+			}
+			else
+				errs()<<"1:setFuncVariable error 10086!!\t"<<varName<<"\n";
+		}
+	}
 }
 
 //build program cfg in the main source file !
 void  ProgramCFG::buildProgramCFG(Module &m, CFG* cfg){
-    Function *main = m.getFunction("main");  
-    if(main == NULL){
-        errs() <<  "error: There is no main function in the Module!\n";
-//        exit(-1) ;
-    }
+		if(funcname == "main"){
+			cfg->startFunc = "main";
+			readFunc("main", cfg, 0);
+		}
+		else{
+			errs() <<  "Warning: There is no main function in the Module!\n";
+    			const Function *F = m.getFunction(funcname);
+			if(!F)
+				errs() <<  "Error: Can't find function "<<funcname<<" in the Module!\n";
+			setFuncVariable(F, funcname, cfg, true);
+			cfg->startFunc = funcname;
 
-    readFunc("main", cfg, 0);
-	
+            map<string ,int >::iterator it=cfg->funcTime.find(funcname);
+            if(it==cfg->funcTime.end())
+                cfg->funcTime.insert(pair<string,int>(funcname,0));
+             else
+                errs()<<"ProgramCFG::buildProgramCFG error "<<funcname<<"\n";
+
+			readFunc(funcname, cfg, 0);
+		}	
 }
 
 void ProgramCFG::readFunc(string funcName, CFG *cfg, int time){
 	Function *F = M.getFunction(funcName);  
     	if(F == NULL){
-    	    	errs() <<  "error readFunc 10086!\n";
+    	    	errs() <<  "error readFunc 10086!\t"<<funcName<<"\n";
 		exit(-1) ;
 	}
 
-    	for(Function::iterator bb = F->begin(); bb != F->end(); bb++){
-        	readBasicblock(bb, cfg, time);
-    	}
+    for(Function::iterator bb = F->begin(); bb != F->end(); bb++){
+        readBasicblock(bb, cfg, time);
+    }
 }
 
 void ProgramCFG::readBasicblock(BasicBlock *b, CFG *cfg, int time){
 	string callFunc;
+
 	if(b){
-
-           
-            //Generate a new state
-            int id = counter_state++;
-            string  str = convertToString(id);
-            string name = "s"+str;
-            State* s = new State(false, id, name);
-            raw_ostream &ROS = errs();
-            formatted_raw_ostream OS(ROS);
-
-            global_CFG.InsertCFGState(counter_state,name);
-            
-	    
 	    const Function* F = b->getParent()?b->getParent():nullptr;
 	    string func = F->getName();
 	    if(time>0)
 		func = func+convertToString(time);
+            //Generate a new state
+        int id = cfg->counter_state++;
+        string  str = convertToString(cfg->counter_s_state++);
+        string name = "s"+str;
+        State* s = new State(false, id, name, func);
+		while(!cfg->initialCons.empty()){
+			Constraint cTemp = cfg->initialCons.front();
+			cfg->initialCons.pop_front();
+			s->consList.push_back(cTemp);
+		}
+        cfg->stateList.resize(id+1);
+        raw_ostream &ROS = errs();
+        formatted_raw_ostream OS(ROS);
+
+        global_CFG.InsertCFGState(cfg->counter_state,name,func);
+            
 //	    errs()<<"0:readBasicblock "<<func<<"\n";
-	    if(func=="main" && b==F->begin()){
-		cfg->initialState=s;
-		s->isInitial=true;
-//		errs()<<"cfg initialed:"<<s->name<<"\n";
-            }
+	    if(func==cfg->startFunc && b==F->begin()){
+            s->level=0;
+			cfg->initialState=s;
+			s->isInitial=true;
+        }
 	    else if(b==F->begin()){
-		for (Function::const_arg_iterator it = F->arg_begin(), E = F->arg_end();
-                it != E; ++it) {
-			string varNum = it->getName();
-			string varName = func+"_"+varNum;
-			Variable var(varName, counter_variable, false);
-			cfg->variableList.push_back(var);
-			counter_variable ++;
-		}
+			setFuncVariable(F, func, cfg);
 	    }
-	    
+
             //Generate the new vector<Constraint>
-            BasicBlock::iterator it_end = b->end();
-            for(BasicBlock::iterator it = b->begin(); it != it_end; it ++){              
-                const Instruction* I = dyn_cast<Instruction>(it);
-		SlotTracker SlotTable(F);
-                const Module* M = F?F->getParent():nullptr;
-                InstParser W(OS, SlotTable, M, nullptr);
-//		errs()<<"InL:\n";W.printInstructionLine(*I);
+        BasicBlock::iterator it_end = b->end();
+        for(BasicBlock::iterator it = b->begin(); it != it_end; it ++){              
+            const Instruction* I = dyn_cast<Instruction>(it);
+			SlotTracker SlotTable(F);
+            const Module* M = F?F->getParent():nullptr;
+            InstParser W(OS, SlotTable, M, nullptr);
+//		    errs()<<"0.InL:";W.printInstructionLine(*I);
                 //create the LabelMap
-                if(it == b->begin())
-                    W.InsertCFGLabel(cfg,b,s, func); 
-                //create the variable table
-                counter_variable = W.setVariable(cfg, I, counter_variable, func);
-                //create the constraint table(NOT TRANSITION)
-                W.setConstraint(cfg, s, it, func);
-		string op = I->getOpcodeName();
-//		errs()<<"1:readBasicblock "<<func<<":"<<op<<"\n";
-		if(op=="call"){
-			const CallInst *call = dyn_cast<CallInst>(I);
-			Function *f = call->getCalledFunction();
-			if(!f) 
-				errs() << "Find a CallInst: "<< *I <<"\n" << "But can't find which function it calls.\n";        
-		// **************************Deal with Function isDefined****************************
-			if(!f->isDeclaration()) {
-				cfg->stateList.push_back(*s);
+            if(it == b->begin()){
+                bool hasFromS = W.InsertCFGLabel(cfg,b,s, func, "", false);
+                if(!hasFromS){
+                    cfg->counter_state--;
+                    cfg->counter_s_state--;
+                    return;
+                }
+                else if(s->level>bound){
+                    if(cfg->stateList.size()<id)
+                        cfg->stateList.resize(id);
+                    cfg->stateList[s->ID]=(*s);
+                    return;
+                }
+			} 
 
-				string callFunc = f->getName();
-				map<string ,int >::iterator it=cfg->funcTime.find(callFunc);
-			    	int t = 0;
-			    	if(it==cfg->funcTime.end())
-					cfg->funcTime.insert(pair<string,int>(callFunc,t));
-			    	else
-					t = ++it->second;
+            // create the constraint table(NOT TRANSITION)
+            W.setConstraint(cfg, s, it, func, target, bound);
+				
+			string op = I->getOpcodeName();
+//			errs()<<"1:readBasicblock "<<func<<":"<<op<<"\n";
+			if(op=="call"){
+				const CallInst *call = dyn_cast<CallInst>(I);
+				Function *f = call->getCalledFunction();
+				if(!f) 
+					errs() << "Find a CallInst: "<< *I <<"\n" << "But can't find which function it calls.\n";        
+			// **************************Deal with Function isDefined****************************
+				if(!f->isDeclaration()) {
+					cfg->stateList[s->ID]=(*s);
 
-				readFunc(callFunc, cfg, t);
-				id = counter_state++;
-				string  str = convertToString(id);
-				name = "s"+str;
-            			s = new State(false, id, name);
-		        	global_CFG.InsertCFGState(id,name);
+					string callFunc = f->getName();
+					map<string ,int >::iterator it=cfg->funcTime.find(callFunc);
+					int t = 0;
+					if(it==cfg->funcTime.end())
+						cfg->funcTime.insert(pair<string,int>(callFunc,t));
+					else
+						t = ++it->second;
 
-				string funcName = callFunc;
-				if(t>0)
-					funcName = callFunc+convertToString(t);
-				W.InsertCFGLabel(cfg, NULL, s, funcName); 
-				cfg->retVar.pop_back();
+					readFunc(callFunc, cfg, t);
+					id = cfg->counter_state++;
+					string  str = convertToString(cfg->counter_s_state++);
+					name = "s"+str;
+					global_CFG.InsertCFGState(id,name,func);
+
+					string funcName = callFunc;
+					if(t>0)
+						funcName = callFunc+convertToString(t);
+					s = new State(false, id, name, func);
+					cfg->stateList.resize(id+1);
+					bool hasFromS = W.InsertCFGLabel(cfg, b, s, func, funcName+"_ret",true);
+                    cfg->retVar.pop_back();
+                    if(!hasFromS){
+                        cfg->counter_state--;
+                        cfg->counter_s_state--;
+                        return;
+                    }
+                    else if(s->level>bound){
+                        if(cfg->stateList.size()<id)
+                            cfg->stateList.resize(id);
+                        cfg->stateList[s->ID]=(*s);
+                        return;
+                    }
+				}
 			}
-		}
 	    }
-	    cfg->stateList.push_back(*s);
+	    cfg->stateList[s->ID] = (*s);
 	}
 }
 

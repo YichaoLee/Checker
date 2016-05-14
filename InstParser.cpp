@@ -590,7 +590,7 @@ int SlotTracker::getMetadataSlot(const MDNode *N) {
 
 /// getLocalSlot - Get the slot number for a value that is local to a function.
 int SlotTracker::getLocalSlot(const Value *V) {
-    assert(!isa<Constant>(V) && "Can't get a constant or global slot with this!");
+    //assert(!isa<Constant>(V) && "Can't get a constant or global slot with this!");
 
     // Check for uninitialized state and do lazy initialization.
     initialize();
@@ -2035,19 +2035,27 @@ void InstParser::printArgument(const Argument *Arg,
 
 
 
-void InstParser::InsertCFGLabel(CFG* cfg,const BasicBlock *BB, State* s, string func)
+bool InstParser::InsertCFGLabel(CFG* cfg,const BasicBlock *BB, State* s, string func, string name, bool usename)
 {
-    if(BB){
-        int SLot = Machine.getLocalSlot(BB);
+	bool hasFromS = (s->level==0);
+    if(!usename){
+		if(!BB->hasName()){
+			errs()<<"0.InsertCFGLabel:error 10086!!!: "<<*BB<<"\n";
+		}
+        string SLot = BB->getName();
         //stringstream ss;
-		string lname = func+"_%"+intToString(SLot); 
+		string lname = func+"_"+SLot; 
         cfg->LabelMap.insert( pair<string,State*> (lname,s));
+        cfg->endBlock[lname] = lname;
+		//	errs()<<"func\t"<<lname <<"\t"<< s->name<<"~~~~~~~~~~~~~~~\n";
 
         for(unsigned int i=0;i<cfg->transitionList.size();i++){
                 if(cfg->transitionList[i].toLabel == lname&&cfg->transitionList[i].toState==NULL)
                 {                   
                     cfg->transitionList[i].toName = s->name;
                     cfg->transitionList[i].toState = s;
+                    s->level = cfg->transitionList[i].level;
+                    hasFromS = true;
                 };
         }   
         for(unsigned int i=0;i<cfg->stateList.size();i++)
@@ -2059,19 +2067,28 @@ void InstParser::InsertCFGLabel(CFG* cfg,const BasicBlock *BB, State* s, string 
                 {
                     s1.transList[j]->toName = s->name;
                     s1.transList[j]->toState = s;
+                    s->level = s1.transList[j]->level;
                 }
             }
         }
     }
     else{
-	string lname = func+"_ret"; 
+    	if(!BB->hasName()){
+			errs()<<"1.InsertCFGLabel:error 10086!!!: "<<*BB<<"\n";	
+		}
+		string lname = name; 
         cfg->LabelMap.insert( pair<string,State*> (lname,s));
+        string SLot = BB->getName();
+		string lname_origin = func+"_"+SLot; 
+		cfg->endBlock[lname_origin] = lname;
 
         for(unsigned int i=0;i<cfg->transitionList.size();i++){
                 if(cfg->transitionList[i].toLabel == lname&&cfg->transitionList[i].toState==NULL)
                 {                   
                     cfg->transitionList[i].toName = s->name;
                     cfg->transitionList[i].toState = s;
+                    s->level = cfg->transitionList[i].level;
+                    hasFromS = true;
                 };
         }   
         for(unsigned int i=0;i<cfg->stateList.size();i++)
@@ -2083,10 +2100,13 @@ void InstParser::InsertCFGLabel(CFG* cfg,const BasicBlock *BB, State* s, string 
                 {
                     s1.transList[j]->toName = s->name;
                     s1.transList[j]->toState = s;
+                    s->level = s1.transList[j]->level;
                 }
             }
         }
     }
+//    errs()<<"2.InsertCFGLabel:"<<*s<<"\n";
+    return hasFromS;
 }
 
 
@@ -2684,57 +2704,63 @@ void NamedMDNode::dump() const { print(dbgs()); }
 /**HELP FUNCTIONS**/
 
 
-void InstParser::setConstraint(CFG* cfg, State* &s, BasicBlock::iterator &it, string func){
+bool isConstantVal(Value *v){
+	return (isa<ConstantInt>(v)||isa<ConstantFP>(v));
+}
+
+void InstParser::setConstraint(CFG* cfg, State* &s, BasicBlock::iterator &it, string func, vector<int> &target, int bound){
     const Instruction* I = dyn_cast<Instruction>(it);
     string op = I->getOpcodeName();
 
     if(!cfg->callVar.empty()){
-	 const Function *f = I->getParent()?I->getParent()->getParent():nullptr;
-	 for (Function::const_arg_iterator it = f->arg_begin(), E = f->arg_end();it != E; ++it) {
-		if(cfg->callVar.empty())
-			errs()<<func<<":-1:First Basicblock error 10086\n";
-		Constraint cTemp1;
-		ParaVariable p1,p2;
-		p2 = cfg->callVar.front();
-		cfg->callVar.pop_front();
-		string varNum = it->getName();
-		string varName = func+"_"+varNum;
-		if(cfg->hasVariable(varName))
-                   	p1.rvar = new Variable(varName,cfg->getVariable(varName)->ID,false);		
-		else
-			errs()<<func<<":0:First Basicblock error 10086\n";
-		cTemp1.lpvList = p1;
-		cTemp1.rpvList = p2;
-   		cTemp1.op=ASSIGN;
-		s->consList.push_back(cTemp1);
+		const Function *f = I->getParent()?I->getParent()->getParent():nullptr;
+		for (Function::const_arg_iterator it = f->arg_begin(), E = f->arg_end();it != E; ++it) {
+			if(cfg->callVar.empty())
+				errs()<<func<<":-1:First Basicblock error 10086 "<<*I<<"\n"<<*s<<"\n";
+			Constraint cTemp1;
+			ParaVariable p1,p2;
+			p2 = cfg->callVar.front();
+			cfg->callVar.pop_front();
+			string varNum = it->getName();
+			string varName = func+"_"+varNum;
+			if(cfg->hasVariable(varName)){
+				Variable *var = cfg->getVariable(varName);
+                p1.rvar = new Variable(var);
+                p1.isExp=false;
+			}
+			else
+				errs()<<func<<":0:First Basicblock error 10086\t"<<varName<<"\n";
+			
+			cTemp1.lpvList = p1;
+			cTemp1.rpvList = p2;
+			cTemp1.op=ASSIGN;
+			s->consList.push_back(cTemp1);
+		}
 	}
-	if(!cfg->callVar.empty())
+	if(!cfg->callVar.empty()){
 		errs()<<func<<":1:First Basicblock error 10086\n";
     }
-
-    if(op == "alloca"){
-	return;
-    }
-    
+    	
     if(s->ContentRec==""){
         //firt time into the state
         if (MDNode *N = I->getMetadata("dbg")){
-        DILocation Loc(N);//DILocation is in DebugInfo.h  
-          
-        StringRef Dir = Loc.getDirectory();
-        StringRef File = Loc.getFilename();
-        s->ContentRec.append(Dir.data());
-        s->ContentRec.append("/");
-        s->ContentRec.append(File.data());
+	        DILocation Loc(N);//DILocation is in DebugInfo.h  
+	          
+	        StringRef Dir = Loc.getDirectory();
+	        StringRef File = Loc.getFilename();
+	        s->ContentRec.append(Dir.data());
+	        s->ContentRec.append("/");
+	        s->ContentRec.append(File.data());
         }
     }
 
+    unsigned Line;
     if (MDNode *N = I->getMetadata("dbg")) {  
         DILocation Loc(N);//DILocation is in DebugInfo.h  
-        unsigned Line = Loc.getLineNumber();  
+        Line = Loc.getLineNumber();  
         bool is_pushed = false;
-        for(int i;i<s->locList.size();i++){
-            if(s->locList[i]==Line)
+        for(int i;i<(int)s->locList.size();i++){
+            if(s->locList[i]==(int)Line)
                 is_pushed = true;
         }
         if(!is_pushed)
@@ -2746,83 +2772,286 @@ void InstParser::setConstraint(CFG* cfg, State* &s, BasicBlock::iterator &it, st
         string s1=ss.str();
         s->ContentRec.append("\tLineNum:");
         s->ContentRec.append(s1.c_str());
-            }
         }
+    }
 
-
-    if(op=="fcmp"){
-    	unsigned n1 = I->getNumOperands();
 	
-	const FCmpInst *CI = dyn_cast<FCmpInst>(I);
+    if(op == "alloca"){
+		string varName = func+"_"+getDesVarName(I);
+		
+		const AllocaInst *AI = dyn_cast<AllocaInst>(I);
+		Type *Ty = AI->getAllocatedType();
+		setVariable(cfg, s, Ty, varName);
+		return;
+    }
+	
+	
+	//pre process before set constraints
+    preprocess(cfg, s, I, func, Line, target);
+	
+	if(op=="fcmp"){
+    	unsigned n1 = I->getNumOperands();
+
+		string c=func+"_"+getDesVarName(I); 
+		Constraint cTemp;
+		ParaVariable p1,p2;
+		cTemp.op=ASSIGN;
+		p2.isExp = true;
+
+		if(cfg->hasVariable(c))
+			errs()<<"0.Load error 10086: "<<c<<"\n";
+		else{
+			Variable var(c, cfg->counter_variable++, INT);
+			cfg->variableList.push_back(var);
+			p1.rvar = new Variable(var);
+			p1.isExp=false;
+			cTemp.lpvList = p1;
+		}
+		const FCmpInst *CI = dyn_cast<FCmpInst>(I);
 				
     	ParaVariable pTemp1,pTemp2;
     	for(unsigned j = 0;j< n1; j ++){
       	    Value* v1 = I->getOperand(j);
-	    string varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
+			string varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
     	    string varName = func+"_"+varNum;
             if(j==0){
-             	if(cfg->hasVariable(varName)){
-                    pTemp1.rvar = new Variable(varName,cfg->getVariable(varName)->ID,false);
+				if(isConstantVal(v1)){                                      
+                    pTemp1.rvar = new Variable(varNum,-1,NUM);
                     pTemp1.isExp=false;
-                   }
-                else{                                      
-                    pTemp1.rvar = new Variable(varNum,-1,true);
-                    pTemp1.isExp=false;
+                    p2.lvar = new Variable(varNum,-1,NUM);
                 }
+				else if(isa<ConstantPointerNull>(v1)){                                  
+                    pTemp1.rvar = new Variable("0",-1,PTR);
+                    pTemp1.isExp=false;                            
+                    p2.lvar = new Variable("0",-1,PTR);
+                }
+                else if(cfg->hasVariable(varName)){
+					Variable *var = cfg->getVariable(varName);
+					if(var->type!=FP)
+						errs()<<"0.FCMP error 10086: "<<varName<<"is a PTR\n";
+                    pTemp1.rvar = new Variable(var);
+                    pTemp1.isExp=false;
+                    p2.lvar = new Variable(var);
+                }
+				else
+					errs()<<"1.FCMP error 10086: "<<*v1<<"\n";
             	cfg->c_tmp1.lpvList = pTemp1;
             	cfg->c_tmp2.lpvList = pTemp1;
             }
-	    else if(j==1){         
-                if(cfg->hasVariable(varName)){
-                    pTemp2.rvar = new Variable(varName,cfg->getVariable(varName)->ID,false);
+			else if(j==1){   
+				if(isConstantVal(v1)){          
+					pTemp2.rvar = new Variable(varNum,-1,NUM);
+					pTemp2.isExp=false;
+					p2.rvar = new Variable(varNum,-1,NUM);
+				}     
+				else if(isa<ConstantPointerNull>(v1)){                                  
+                    pTemp2.rvar = new Variable("0",-1,PTR);
                     pTemp2.isExp=false;
-                   }
-                 else{          
-                    pTemp2.rvar = new Variable(varNum,-1,true);
-                    pTemp2.isExp=false;
-                 }
-            	cfg->c_tmp1.rpvList = pTemp2;
-            	cfg->c_tmp2.rpvList = pTemp2;
+                    p2.rvar = new Variable("0",-1,PTR);
+                }
+				else if(cfg->hasVariable(varName)){
+					Variable *var = cfg->getVariable(varName);
+					if(var->type!=FP)
+						errs()<<"2.FCMP error 10086: "<<varName<<"is not a FP\n";
+					pTemp2.rvar = new Variable(var);
+					pTemp2.isExp=false;
+					p2.rvar = new Variable(var);
+				} 
+				else
+					errs()<<"3.FCMP error 10086: "<<varName<<"\n";
+				cfg->c_tmp1.rpvList = pTemp2;
+				cfg->c_tmp2.rpvList = pTemp2;
             }
       	}                           
         string s_tmp1=getPredicateText_op(CI->getPredicate());
-        cfg->c_tmp1.op=getEnumOperator(s_tmp1);                          
+        cfg->c_tmp1.op=getEnumOperator(s_tmp1);                      
         string s_tmp2=getPredicateText_op_reverse(CI->getPredicate());
-        cfg->c_tmp2.op=getEnumOperator(s_tmp2);        
+        cfg->c_tmp2.op=getEnumOperator(s_tmp2);
+        p2.op =  get_m_Operator(s_tmp1);
+        cTemp.rpvList = p2;
+        s->consList.push_back(cTemp);
     }
 
     else if(op=="icmp"){
     	unsigned n1 = I->getNumOperands();
-	
-	const CmpInst *CI = dyn_cast<CmpInst>(I);
-		
+
+		string c=func+"_"+getDesVarName(I); 
+		Constraint cTemp;
+		ParaVariable pt1,pt2;
+		cTemp.op=ASSIGN;
+		pt2.isExp = true;
+
+		if(cfg->hasVariable(c))
+			errs()<<"0.Load error 10086: "<<c<<"\n";
+		else{
+			Variable var(c, cfg->counter_variable++, INT);
+			cfg->variableList.push_back(var);
+			pt1.rvar = new Variable(var);
+			pt1.isExp=false;
+			cTemp.lpvList = pt1;
+		}
+		const CmpInst *CI = dyn_cast<CmpInst>(I);
 
     	ParaVariable pTemp1,pTemp2;
     	for(unsigned j = 0;j< n1; j ++){
       	    Value* v1 = I->getOperand(j);
-	    string varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
+			string varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
     	    string varName = func+"_"+varNum;
             if(j==0){
-             	if(cfg->hasVariable(varName)){
-                    pTemp1.rvar = new Variable(varName,cfg->getVariable(varName)->ID,false);
+				if(isConstantVal(v1)){                                      
+                    pTemp1.rvar = new Variable(varNum,-1,NUM);
                     pTemp1.isExp=false;
-                   }
-                else{                                      
-                    pTemp1.rvar = new Variable(varNum,-1,true);
-                    pTemp1.isExp=false;
+                    pt2.lvar = new Variable(varNum,-1,NUM);
                 }
+				else if(isa<ConstantPointerNull>(v1)){                                  
+                    pTemp1.rvar = new Variable("0",-1,PTR);
+                    pTemp1.isExp=false;
+                    pt2.lvar = new Variable("0",-1,PTR);
+                }
+				else if(isa<ConstantExpr>(v1)){
+					ConstantExpr *expr = dyn_cast<ConstantExpr>(v1);
+					Instruction *EI = expr->getAsInstruction();
+					if(EI->getOpcode() != Instruction::GetElementPtr)
+						errs()<<"1.Icmp Error 10086!! "<<*I<<"\t"<<*v1<<"\t"<<*EI<<"\n";
+					else{
+						//set temp PTR constraints
+						Constraint cTemp1;
+						cTemp1.op=ASSIGN;
+						ParaVariable p1,p2;
+						unsigned n2 = EI->getNumOperands();
+								
+						Value* v2 = EI->getOperand(0);
+						string varNum1 = getVariableName(Out, v2, &TypePrinter, &Machine, TheModule);
+						string varName1 = func+"_"+varNum1;
+						if(isa<GlobalVariable>(v2) )
+							varName1 = setGlobal(varNum1, v2, cfg, s);
+								
+						Variable tempVar;
+						if(cfg->hasVariable(varName1)){
+							Variable *var = cfg->getVariable(varName1);
+							if(var->type!=PTR)
+								errs()<<"2.Icmp: error 10086: "<<varName<<"\n";
+							tempVar = new Variable(varName1,var->ID,PTR);
+						}
+						else
+							errs()<<"3.Icmp.Getelementptr: error 10086\t"<<varName1<<"\n";
+								
+						for(int i=0; i<(int)n2-2; i++){
+							string tempName = varName+"_t"+intToString(i);
+							Variable tVar(tempName, cfg->counter_variable++, PTR);
+							cfg->variableList.push_back(tVar);
+							p1.rvar = new Variable(tVar);
+							
+							v2 = EI->getOperand(i+2);
+							varNum1 = getVariableName(Out, v2, &TypePrinter, &Machine, TheModule);
+							if(isConstantVal(v2))
+								p2.rvar = new Variable(varNum1,-1,NUM);
+							else 
+								errs()<<"4.Icmp: error 10086: "<<varNum1<<"\n";
+									
+							p2.lvar = new Variable(tempVar);
+							p2.op = GETPTR;
+							p2.isExp = true;
+							cTemp1.lpvList = p1;
+							cTemp1.rpvList = p2;
+							s->consList.push_back(cTemp1);
+									
+							tempVar = tVar;
+						}
+								
+						pTemp1.rvar = new Variable(tempVar);
+						pt2.lvar = new Variable(tempVar);
+					}
+				}
+             	else if(cfg->hasVariable(varName)){
+					Variable *var = cfg->getVariable(varName);
+					if(var->type!=INT&&var->type!=PTR)
+						errs()<<"5.ICMP warning 10086: "<<varName<<"is not a INT or PTR\n";
+                    pTemp1.rvar = new Variable(var);
+                    pTemp1.isExp=false;
+                    pt2.lvar = new Variable(var);
+                }
+                else 
+					errs()<<"6.ICMP error 10086: "<<*v1<<"\n";
             	cfg->c_tmp1.lpvList = pTemp1;
             	cfg->c_tmp2.lpvList = pTemp1;
             }
-	    else if(j==1){         
-                if(cfg->hasVariable(varName)){
-                    pTemp2.rvar = new Variable(varName,cfg->getVariable(varName)->ID,false);
+			else if(j==1){         
+                if(isConstantVal(v1)){         
+                    pTemp2.rvar = new Variable(varNum,-1,NUM);
                     pTemp2.isExp=false;
-                   }
-                 else{         
-                    pTemp2.rvar = new Variable(varNum,-1,true);
+                    pt2.rvar = new Variable(varNum,-1,NUM);
+                }
+				else if(isa<ConstantPointerNull>(v1)){                                  
+                    pTemp2.rvar = new Variable("0",-1,PTR);
                     pTemp2.isExp=false;
-                 }
+                    pt2.rvar = new Variable("0",-1,PTR);
+                }
+				else if(isa<ConstantExpr>(v1)){
+					ConstantExpr *expr = dyn_cast<ConstantExpr>(v1);
+					Instruction *EI = expr->getAsInstruction();
+					if(EI->getOpcode() != Instruction::GetElementPtr)
+						errs()<<"7.Icmp Error 10086!! "<<*I<<"\t"<<*v1<<"\t"<<*EI<<"\n";
+					else{
+						//set temp PTR constraints
+						Constraint cTemp1;
+						cTemp1.op=ASSIGN;
+						ParaVariable p1,p2;
+						unsigned n2 = EI->getNumOperands();
+								
+						Value* v2 = EI->getOperand(0);
+						string varNum1 = getVariableName(Out, v2, &TypePrinter, &Machine, TheModule);
+						string varName1 = func+"_"+varNum1;
+						if(isa<GlobalVariable>(v2) )
+							varName = setGlobal(varNum1, v2, cfg, s);
+								
+						Variable tempVar;
+						if(cfg->hasVariable(varName1)){
+							Variable *var = cfg->getVariable(varName1);
+							if(var->type!=PTR)
+								errs()<<"8.Icmp: error 10086: "<<varName1<<"\n";
+							tempVar = new Variable(varName1,var->ID,PTR);
+						}
+						else
+							errs()<<"9.Icmp.Getelementptr: error 10086\t"<<varName1<<"\n";
+								
+						for(int i=0; i<(int)n2-2; i++){
+							string tempName = varName+"_t"+intToString(i);
+							Variable tVar(tempName, cfg->counter_variable++, PTR);
+							cfg->variableList.push_back(tVar);
+							p1.rvar = new Variable(tVar);
+							
+							v2 = EI->getOperand(i+2);
+							varNum1 = getVariableName(Out, v2, &TypePrinter, &Machine, TheModule);
+							if(isConstantVal(v2))
+								p2.rvar = new Variable(varNum1,-1,NUM);
+							else 
+								errs()<<"10.Icmp: error 10086: "<<varNum1<<"\n";
+									
+							p2.lvar = new Variable(tempVar);
+							p2.op = GETPTR;
+							p2.isExp = true;
+							cTemp1.lpvList = p1;
+							cTemp1.rpvList = p2;
+							s->consList.push_back(cTemp1);
+									
+							tempVar = tVar;
+						}
+								
+						pTemp2.rvar = new Variable(tempVar);
+						pt2.rvar = new Variable(tempVar);
+					}
+				}
+				else if(cfg->hasVariable(varName)){
+					Variable *var = cfg->getVariable(varName);
+					if(var->type!=INT&&var->type!=PTR)
+						errs()<<"11.ICMP warning 10086: "<<varName<<"is not a INT or PTR\n";
+                    pTemp2.rvar = new Variable(var);
+                    pTemp2.isExp=false;
+                    pt2.rvar = new Variable(var);
+                }
+                else 
+					errs()<<"12.ICMP error 10086: "<<*v1<<"\n";
             	cfg->c_tmp1.rpvList = pTemp2;
             	cfg->c_tmp2.rpvList = pTemp2;
             }
@@ -2830,108 +3059,617 @@ void InstParser::setConstraint(CFG* cfg, State* &s, BasicBlock::iterator &it, st
         string s_tmp1=getPredicateText_op(CI->getPredicate());
         cfg->c_tmp1.op=getEnumOperator(s_tmp1);                   
         string s_tmp2=getPredicateText_op_reverse(CI->getPredicate());
-        cfg->c_tmp2.op=getEnumOperator(s_tmp2);      
+        cfg->c_tmp2.op=getEnumOperator(s_tmp2);  
+        pt2.op =  get_m_Operator(s_tmp1);
+        cTemp.rpvList = pt2;
+//       s->consList.push_back(cTemp);    
     }
-    else if(op=="load"||op=="sitofp"||op=="fpext"||op=="fptosi"||op=="sext"){
+
+    else if(op=="sitofp"||op=="fpext"||op=="fptosi"||op=="sext"||op=="uitofp"||op=="zext"||op=="trunc"||op=="fptrunc"||op=="fptoui"||op=="bitcast"){
         Constraint cTemp;
         unsigned n1 = I->getNumOperands();
         string c=func+"_"+getDesVarName(I); 
-        ParaVariable pTemp1,pTemp2;//,pTemp3;
+        ParaVariable pTemp1,pTemp2;
+
+        VarType type;
+		Type *Ty = I->getType();
+		if(Ty->isPointerTy())
+			type = PTR;
+		else if(Ty->isIntegerTy())
+			type = INT;
+		else if(Ty->isFloatingPointTy())
+			type = FP;
+		else
+			errs()<<"0.type error\n";
+
         if(cfg->hasVariable(c))
-        	pTemp1.rvar = new Variable(c,cfg->getVariable(c)->ID,false);//%0.%1,%2,.....
-	else{;}
+			errs()<<"0.Transform error 10086: "<<c<<"\n";
+		else{
+			Variable var(c, cfg->counter_variable++, type);
+			cfg->variableList.push_back(var);
+            pTemp1.rvar = new Variable(var);
+            pTemp1.isExp=false;
+		}
     	cTemp.lpvList = pTemp1;
     	cTemp.op=ASSIGN;
         for(unsigned j = 0;j< n1; j ++){
         	Value* v1 = I->getOperand(j);
-		string varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
+			string varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
 	    	string varName = func+"_"+varNum;
         	if(j==0){
-            		if(cfg->hasVariable(varName))
-                    		pTemp2.rvar = new Variable(varName,cfg->getVariable(varName)->ID,false);
+            	if(cfg->hasVariable(varName)){
+					Variable *var = cfg->getVariable(varName);
+					if(var->type!=INT && var->type!=FP)
+						errs()<<"1.Transform: warning 10086: "<<varName<<"is PTR\n";
+					pTemp2.rvar = new Variable(var);
+					pTemp2.isExp=false;
+		        }
 		        else{
-                 		errs()<<"Error!!\n";
-                	}
+                 	errs()<<"2.Transform: Error 10086!!"<<varName<<"\n";
+                }
         	}
-		else if(j==1){         
-                    	errs()<<"Error!!!!!\n";     
+			else if(j==1){         
+				errs()<<"3.Transform: Error 10086!!\n";     
         	}   
      	}
      	cTemp.rpvList = pTemp2;
      	s->consList.push_back(cTemp);
      }
-	
+     else if(op=="load"){
+		const LoadInst *CI = dyn_cast<LoadInst>(I);
+		Constraint cTemp;
+		unsigned n1 = I->getNumOperands();
+		string c=func+"_"+getDesVarName(I); 
+		ParaVariable pTemp1,pTemp2;
+		cTemp.op=ASSIGN;
+		pTemp2.op = LOAD;
+		pTemp2.isExp = true;
 
+		VarType type;
+		Type *Ty = I->getType();
+		if(Ty->isPointerTy())
+			type = PTR;
+		else if(Ty->isIntegerTy())
+			type = INT;
+		else if(Ty->isFloatingPointTy())
+			type = FP;
+		else
+			errs()<<"1.type error\n";
+
+		if(cfg->hasVariable(c))
+			errs()<<"0.Load error 10086: "<<c<<"\n";
+		else{
+			Variable var(c, cfg->counter_variable++, type);
+			cfg->variableList.push_back(var);
+			pTemp1.rvar = new Variable(var);
+			pTemp1.isExp=false;
+		}
+			for(unsigned j = 0;j< n1; j ++){
+				Value* v1 = I->getOperand(j);
+				if(isa<ConstantExpr>(v1)){
+					ConstantExpr *expr = dyn_cast<ConstantExpr>(v1);
+					Instruction *EI = expr->getAsInstruction();
+					if(EI->getOpcode() != Instruction::GetElementPtr)
+						errs()<<"4.Load:Error 10086!! "<<*I<<"\t"<<*v1<<"\t"<<*EI<<"\n";
+					else{
+						//set temp PTR constraints
+						Constraint cTemp1;
+						cTemp1.op=ASSIGN;
+						ParaVariable p1,p2;
+						
+						unsigned n2 = EI->getNumOperands();
+						
+						Value* v2 = EI->getOperand(0);
+						string varNum = getVariableName(Out, v2, &TypePrinter, &Machine, TheModule);
+						string varName = func+"_"+varNum;
+						if(isa<GlobalVariable>(v2) )
+							varName = setGlobal(varNum, v2, cfg, s);
+						
+						Variable tempVar;
+						if(cfg->hasVariable(varName)){
+							Variable *var = cfg->getVariable(varName);
+							if(var->type!=PTR)
+								errs()<<"5.Load: error 10086: "<<varName<<"\n";
+							tempVar = new Variable(var);
+						}
+						else
+							errs()<<"6.Load.Getelementptr: error 10086\t"<<varName<<"\n";
+						
+						for(int i=0; i<(int)n2-2; i++){
+							string tempName = c+"_t"+intToString(i);
+							Variable tVar(tempName, cfg->counter_variable++, PTR);
+							cfg->variableList.push_back(tVar);
+							p1.rvar = new Variable(tVar);
+							
+							v2 = EI->getOperand(i+2);
+							string varNum = getVariableName(Out, v2, &TypePrinter, &Machine, TheModule);
+							if(isConstantVal(v2))
+								p2.rvar = new Variable(varNum,-1,NUM);
+							else 
+								errs()<<"7.Load: error 10086: "<<varNum<<"\n";
+							
+							p2.lvar = new Variable(tempVar);
+							p2.op = GETPTR;
+							p2.isExp = true;
+							cTemp1.lpvList = p1;
+							cTemp1.rpvList = p2;
+							s->consList.push_back(cTemp1);
+							
+							tempVar = tVar;
+						}
+						
+						pTemp2.rvar = new Variable(tempVar);
+					}
+				}
+				else if(isa<GlobalVariable>(v1)){
+					string varName = v1->getName();
+					if(!cfg->hasVariable(varName)){
+						varName = setGlobal(varName, v1, cfg, s);
+					}
+					Variable *var = cfg->getVariable(varName);
+					pTemp2.rvar = new Variable(var);
+				}
+				else{
+					string varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
+					string varName = func+"_"+varNum;
+					if(j==0){
+							if(cfg->hasVariable(varName)){
+							Variable *var = cfg->getVariable(varName);
+							if(var->type!=PTR)
+								errs()<<"9.Load: error 10086: "<<varName<<"\n";
+							pTemp2.rvar = new Variable(varName,var->ID,PTR);
+						}
+						else{
+							errs()<<"10.load:Error 10086!! "<<*I<<"\t"<<varName<<"\t"<<"\n";
+						}
+					}
+					else if(j==1){         
+						errs()<<"11.load:Error 10087!!\n";  
+					}   
+				}   
+			}
+//		}
+		cTemp.lpvList = pTemp1;
+		cTemp.rpvList = pTemp2;
+		s->consList.push_back(cTemp);
+    }
      else if(op=="store"){
     	Constraint cTemp;
     	unsigned n1 = I->getNumOperands();
+		if(n1>2)
+			errs()<<"0.Store error 10086: "<<n1<<"\n";
     	ParaVariable pTemp1,pTemp2;
-	cTemp.op=ASSIGN;
-    	for(unsigned j = 0;j< n1; j ++){
-        	Value* v1 = I->getOperand(j);
+		cTemp.op=ASSIGN;
+        Value* v1 = I->getOperand(0);
+    	
 		string varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
-	    	string varName = func+"_"+varNum;
-        	if(j==0){
-		     	if(cfg->hasVariable(varName)){
-		            	pTemp1.rvar = new Variable(varName,cfg->getVariable(varName)->ID,false);
-		        }
-		        else{          
-		            	pTemp1.rvar = new Variable(varNum,-1,true);
-		            	pTemp1.isExp=false;
-		        }
-		        cTemp.rpvList = pTemp1;
-        	}
-		else if(j==1){
-		    	if(cfg->hasVariable(varName)){
-		        	pTemp2.rvar = new Variable(varName,cfg->getVariable(varName)->ID,false);
-		        }
-			else 
-				errs()<<"Store:Error!!!!!\n";
-		        cTemp.lpvList = pTemp2;
+		string varName = func+"_"+varNum;
+
+
+		Value* v2 = I->getOperand(1);
+		string varNum2 = getVariableName(Out, v2, &TypePrinter, &Machine, TheModule);
+		string varName2 = func+"_"+varNum2;
+
+		Type *Ty = v1->getType();
+
+		if(isa<ConstantExpr>(v1)){
+			ConstantExpr *expr = dyn_cast<ConstantExpr>(v1);
+			Instruction *EI = expr->getAsInstruction();
+			if(EI->getOpcode() != Instruction::GetElementPtr)
+				errs()<<"1.Store Error 10086!! "<<*I<<"\t"<<*v1<<"\t"<<*EI<<"\n";
+			else{
+				//set temp PTR constraints
+				Constraint cTemp1;
+				cTemp1.op=ASSIGN;
+				ParaVariable p1,p2;
+				unsigned n2 = EI->getNumOperands();
+						
+				Value* v2 = EI->getOperand(0);
+				string varNum1 = getVariableName(Out, v2, &TypePrinter, &Machine, TheModule);
+				string varName1 = func+"_"+varNum1;
+				if(isa<GlobalVariable>(v2) )
+					varName = setGlobal(varNum1, v2, cfg, s);
+						
+				Variable tempVar;
+				if(cfg->hasVariable(varName1)){
+					Variable *var = cfg->getVariable(varName1);
+					if(var->type!=PTR)
+						errs()<<"2.Store: error 10086: "<<varName1<<"\n";
+					tempVar = new Variable(varName1,var->ID,PTR);
+				}
+				else
+					errs()<<"3.Store.Getelementptr: error 10086\t"<<varName1<<"\n";
+						
+				for(int i=0; i<(int)n2-2; i++){
+					string tempName = varName+"_t"+intToString(i);
+					Variable tVar(tempName, cfg->counter_variable++, PTR);
+					cfg->variableList.push_back(tVar);
+					p1.rvar = new Variable(tVar);
+					
+					v2 = EI->getOperand(i+2);
+					string varNum = getVariableName(Out, v2, &TypePrinter, &Machine, TheModule);
+					if(isConstantVal(v2))
+						p2.rvar = new Variable(varNum,-1,NUM);
+					else 
+						errs()<<"4.Store: error 10086: "<<varNum<<"\n";
+							
+					p2.lvar = new Variable(tempVar);
+					p2.op = GETPTR;
+					p2.isExp = true;
+					cTemp1.lpvList = p1;
+					cTemp1.rpvList = p2;
+					s->consList.push_back(cTemp1);
+							
+					tempVar = tVar;
+				}
+						
+				pTemp2.rvar = new Variable(tempVar);
+			}
 		}
-	}
+		else if(isConstantVal(v1)){
+			string varName_1 = varName2+"/"+intToString(Line);
+			VarType type;
+			if(isa<ConstantInt>(v1))
+				type = INT;
+			else 
+				type = FP;
+			Variable var = new Variable(varName_1,cfg->counter_variable++,type);
+			cfg->variableList.push_back(var);
+			pTemp1.rvar = new Variable(var); 
+			pTemp2.rvar = new Variable(varNum,-1,NUM);
+			cTemp.lpvList = pTemp1;
+			cTemp.rpvList = pTemp2;
+			s->consList.push_back(cTemp);
+			pTemp2.rvar = new Variable(var);
+		}
+		else if(isa<ConstantPointerNull>(v1)){                                  
+            string varName_1 = varName2+"/"+intToString(Line);
+			Variable var = new Variable(varName_1,cfg->counter_variable++,PTR);
+			cfg->variableList.push_back(var);
+			pTemp1.rvar = new Variable(var); 
+			pTemp2.rvar = new Variable("0",-1,PTR);
+			cTemp.lpvList = pTemp1;
+			cTemp.rpvList = pTemp2;
+			s->consList.push_back(cTemp);
+			pTemp2.rvar = new Variable(var);
+        }
+		else if(cfg->hasVariable(varName)){
+			Variable *var = cfg->getVariable(varName);
+			pTemp2.rvar = new Variable(var);
+		}
+		else 
+			errs()<<"6.Store error 10086\t"<<varName<<"\n";
+		
+		if(cfg->hasVariable(varName2)){
+			Variable *var = cfg->getVariable(varName2);
+			if(var->type!=PTR)
+				errs()<<"9.Store error 10086\t"<<varName2<<"\n";
+			pTemp1.rvar = new Variable(var);
+		}
+		else
+			errs()<<"10.Store error 10086\t"<<varName2<<"\n";
+
+		if(Ty->isPointerTy()){
+			if(pTemp1.rvar->type!=PTR)
+				errs()<<"7.Store error 10086\t"<<varName2<<"\n";
+		}
+
+		pTemp2.op = STORE;
+		pTemp2.isExp = true;
+		cTemp.lpvList = pTemp1;
+		cTemp.rpvList = pTemp2;
+	
     	s->consList.push_back(cTemp);
     }
 
-    else if(op=="add"||op=="fadd"||op=="sub"||op=="fsub"||op=="mul"||op=="fmul"||op=="sdiv"||op=="fdiv"){
+    else if(op=="shl"||op=="ashr"||op=="srem"||op=="add"||op=="fadd"||op=="sub"||op=="fsub"||op=="mul"||op=="fmul"||op=="sdiv"||op=="fdiv"||op=="udiv"||op=="and"||op=="or"||op=="xor"||op=="nand"){
 
-	Constraint cTemp;
+		Constraint cTemp;
         unsigned n1 = I->getNumOperands();
         string c=func+"_"+getDesVarName(I); 
         ParaVariable pTemp1,pTemp2;//,pTemp3;
+
+        VarType type;
+		Type *Ty = I->getType();
+		if(Ty->isIntegerTy())
+			type = INT;
+		else if(Ty->isFloatingPointTy())
+			type = FP;
+		else
+			errs()<<"2.type error\n";
+
         if(cfg->hasVariable(c))
-        	pTemp1.rvar = new Variable(c,cfg->getVariable(c)->ID,false);//%0.%1,%2,.....
-	else{
-        	errs()<<"Error!!!\n";
-	}
+			errs()<<"0.Compute error 10086: "<<c<<"\n";
+		else{
+			Variable var(c, cfg->counter_variable++, type);
+			cfg->variableList.push_back(var);
+			pTemp1.rvar = new Variable(var);
+			pTemp1.isExp=false;
+		}
     	cTemp.lpvList = pTemp1;
     	cTemp.op=ASSIGN;
         for(unsigned j = 0;j< n1; j ++){
         	Value* v1 = I->getOperand(j);
-		string varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
-		string varName = func+"_"+varNum;
+			string varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
+			string varName = func+"_"+varNum;
         	if(j==0){
-            		if(cfg->hasVariable(varName))
-                    		pTemp2.lvar = new Variable(varName,cfg->getVariable(varName)->ID,false);
-		        else{
-                 		pTemp2.lvar = new Variable(varNum,-1,true);
-                	}
-        	}
-		else if(j==1){         
-            		if(cfg->hasVariable(varName))
-                    		pTemp2.rvar = new Variable(varName,cfg->getVariable(varName)->ID,false);
-		        else{
-                 		pTemp2.rvar = new Variable(varNum,-1,true);
-                	}  
-        	}   
-     	}
-	pTemp2.op = get_m_Operator(op);
-	pTemp2.isExp = true;
+            	if(isConstantVal(v1))
+					pTemp2.lvar = new Variable(varNum,-1,NUM);
+				else if(cfg->hasVariable(varName)){
+					Variable *var = cfg->getVariable(varName);
+					if(var->type!=INT && var->type!=FP)
+						errs()<<"1.Compute: error 10086: "<<varName<<"\n";
+					pTemp2.lvar = new Variable(varName,var->ID,type);
+				}
+				else 
+					errs()<<"2.Compute: error 10086: "<<varName<<"\n";
+			}		
+			else if(j==1){        
+				if(isConstantVal(v1))
+					pTemp2.rvar = new Variable(varNum,-1,NUM);
+				else if(cfg->hasVariable(varName)){
+					Variable *var = cfg->getVariable(varName);
+					if(var->type!=INT && var->type!=FP)
+						errs()<<"3.Compute: error 10086: "<<varName<<"\n";
+					pTemp2.rvar = new Variable(varName,var->ID,type);
+				}		
+				else 
+					errs()<<"4.Compute: error 10086: "<<varName<<"\n";
+			}
+        }
+		pTemp2.op = get_m_Operator(op);
+		pTemp2.isExp = true;
      	cTemp.rpvList = pTemp2;
      	s->consList.push_back(cTemp);
 
     }
     
+    else if(op == "select"){
+    	Constraint cTemp;
+        string c=func+"_"+getDesVarName(I); 
+        ParaVariable pTemp1,pTemp2;//,pTemp3;
+
+        VarType type;
+        Type *Ty = I->getType();
+		if(Ty->isPointerTy())
+			type = PTR;
+		else if(Ty->isIntegerTy())
+			type = INT;
+		else if(Ty->isFloatingPointTy())
+			type = FP;
+		else
+			errs()<<"3.type error\n";
+
+        if(cfg->hasVariable(c))
+			errs()<<"1.Select error 10086: "<<c<<"\n";
+		else{
+			Variable var(c, cfg->counter_variable++, type);
+			cfg->variableList.push_back(var);
+			pTemp1.rvar = new Variable(var);
+			pTemp1.isExp=false;
+		}
+		cTemp.op = ASSIGN;
+		cTemp.lpvList = pTemp1;
+
+		unsigned n1 = I->getNumOperands();
+		if(n1!=3)
+			errs()<<"2.Select error 10086\n";
+    	int t1,t2;
+    	string toLabel1,toLabel2;
+    	Transition *tr1,*tr2;
+
+	    t1 =cfg->counter_transition++;
+	    t2 = cfg->counter_transition++;
+	    stringstream st1,st2;
+	    string tt1,tt2;
+	    st1<<t1;
+	    st1>>tt1;
+	    st2<<t2;
+	    st2>>tt2;
+	    tr1=new Transition(t1,"e"+tt1);
+	    tr2=new Transition(t2,"e"+tt2);
+	    tr1->fromState=s;
+	   	tr1->fromName=s->name;
+	   	tr1->level=s->level+1;
+	    tr1->toState=NULL;
+
+	    tr2->fromState=s;
+	    tr2->fromName=s->name;
+	   	tr2->level=s->level+1;
+	    tr2->toState=NULL;
+
+		cfg->stateList.push_back(*s);
+	    State *s1;
+	    State *s2;
+	    BasicBlock* b = it->getParent();
+	    if(b==NULL)
+	    	errs()<<"3.Select error 10086\n";
+    	for(unsigned j = 1;j< n1; j ++){
+			Value* v1 = I->getOperand(j);
+		
+			string varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
+			string varName = func+"_"+varNum;
+			//errs()<<varName;
+			//follow the cmp Instruction
+
+		    if(j==1){//its the left
+
+		    	if(isConstantVal(v1))
+					pTemp2.rvar = new Variable(varNum,-1,NUM);
+				else if(cfg->hasVariable(varName)){
+					Variable *var = cfg->getVariable(varName);
+					pTemp2.rvar = new Variable(var);
+				}
+				else 
+					errs()<<"4.Select: error 10086: "<<varName<<"\n";
+				pTemp2.isExp = false;
+				cTemp.rpvList = pTemp2;
+
+		    	int id = cfg->counter_state++;
+        		string  str = intToString(cfg->counter_s_state++);
+        		string name = "s"+str;
+	    		s1 = new State(false, id, name, func);
+
+		        toLabel1=c+"_true";
+		        tr1->toLabel=toLabel1;
+		        InsertCFGLabel(cfg,b,s1, func, toLabel1, true);
+
+		        if(s1!=NULL)
+		        {
+		            tr1->toName = s1->name;
+		            tr1->toState = s1;
+		        }
+		        s1->level = tr1->level;
+
+			    tr1->guardList.push_back(cfg->c_tmp1);
+			   	s->transList.push_back(tr1);
+			    cfg->transitionList.push_back(*tr1);//follow the transList
+
+			    s1->consList.push_back(cTemp);
+		    }
+			else if (j==2){
+				if(isConstantVal(v1))
+					pTemp2.rvar = new Variable(varNum,-1,NUM);
+				else if(cfg->hasVariable(varName)){
+					Variable *var = cfg->getVariable(varName);
+					pTemp2.rvar = new Variable(var);
+				}
+				else 
+					errs()<<"5.Select: error 10086: "<<varName<<"\n";
+				pTemp2.isExp = false;
+				cTemp.rpvList = pTemp2;
+
+				int id = cfg->counter_state++;
+        		string  str = intToString(cfg->counter_s_state++);
+        		string name = "s"+str;
+	    		s2 = new State(false, id, name, func);
+//	    		errs()<<*s2<<"\n";
+
+		        toLabel2=c+"_false";
+		        tr2->toLabel=toLabel2;
+		        InsertCFGLabel(cfg,b,s2, func, toLabel2, true);
+		        if(s2!=NULL)
+		        {
+		            tr2->toName = s2->name;
+		            tr2->toState = s2;
+		        }
+		        s2->level = tr2->level;
+
+			    tr2->guardList.push_back(cfg->c_tmp2);
+			    s->transList.push_back(tr2);
+			    cfg->transitionList.push_back(*tr2);//follow the transList
+
+			    s2->consList.push_back(cTemp);
+		    }
+		}
+
+		int id = cfg->counter_state++;
+        string  str = intToString(cfg->counter_s_state++);
+        string name = "s"+str;
+	    State *s3 = new State(false, id, name, func);
+
+	    Transition *tr3, *tr4;
+	    t1 =cfg->counter_transition++;
+	    t2 = cfg->counter_transition++;
+	    st1<<t1;
+	    st1>>tt1;
+	    st2<<t2;
+	    st2>>tt2;
+	    tr3=new Transition(t1,"e"+tt1);
+	    tr4=new Transition(t2,"e"+tt2);
+	    tr3->fromState=s1;
+	   	tr3->fromName=s1->name;
+	   	tr3->level=s1->level+1;
+	    tr3->toState=NULL;
+
+	    tr4->fromState=s2;
+	    tr4->fromName=s2->name;
+	   	tr4->level=s2->level+1;
+	    tr4->toState=NULL;
+
+	    s3->level = (tr3->level>tr4->level)?tr4->level:tr3->level;
+	    string toLabel3 = c+"_ret";
+
+		tr3->toLabel=toLabel3;
+		tr4->toLabel=toLabel3;
+		s1->transList.push_back(tr3);
+		s2->transList.push_back(tr4);
+
+		cfg->transitionList.push_back(*tr3);
+		cfg->transitionList.push_back(*tr4);
+		cfg->stateList.resize(id+1);
+		cfg->stateList[s->ID] = *s;
+		cfg->stateList[s1->ID] = *s1;
+		cfg->stateList[s2->ID] = *s2;
+
+		InsertCFGLabel(cfg,b,s3, func, toLabel3, true);
+
+		s = s3;
+    }
+
+    else if(op == "phi"){
+    	Constraint cTemp;
+        string c=func+"_"+getDesVarName(I); 
+        ParaVariable pTemp1,pTemp2;//,pTemp3;
+
+        VarType type;
+        Type *Ty = I->getType();
+		if(Ty->isPointerTy())
+			type = PTR;
+		else if(Ty->isIntegerTy())
+			type = INT;
+		else if(Ty->isFloatingPointTy())
+			type = FP;
+		else
+			errs()<<"0.type error\n";
+
+        if(cfg->hasVariable(c))
+			errs()<<"1.PHINode error 10086: "<<c<<"\n";
+		else{
+			Variable var(c, cfg->counter_variable++, type);
+			cfg->variableList.push_back(var);
+			pTemp1.rvar = new Variable(var);
+			pTemp1.isExp=false;
+		}
+		cTemp.op = ASSIGN;
+
+		const PHINode *PN = dyn_cast<PHINode>(I);
+
+        for (unsigned i = 0, Eop = PN->getNumIncomingValues(); i < Eop; ++i) {
+            Value *v = PN->getIncomingValue(i);
+            string varNum = getVariableName(Out, v, &TypePrinter, &Machine, TheModule);
+            string varName = func+"_"+varNum;
+            if(isConstantVal(v)){
+            	pTemp2.rvar = new Variable(varNum,-1,NUM);
+            }
+            else if(cfg->hasVariable(varName)){
+				Variable *var = cfg->getVariable(varName);
+				if(var->type!=type)
+					errs()<<"2.PHINode error 10086: "<<varName<<"\n";
+				pTemp2.rvar = new Variable(varName,var->ID,type);
+			}
+			else 
+				errs()<<"3.PHINode error 10086: "<<varName<<"\n";
+
+			pTemp2.isExp = false;
+			cTemp.lpvList = pTemp1;
+			cTemp.rpvList = pTemp2;
+
+            BasicBlock *bb = PN->getIncomingBlock(i);
+            string bbName = bb->getName();
+            string fromLabel = func+"_"+bbName;
+            string label = cfg->endBlock[fromLabel];
+            State *froms = cfg->LabelMap[label];
+            string toName = s->name;
+            for(unsigned j=0, trsize = froms->transList.size(); j!=trsize; j++){
+            	Transition *fromtr = froms->transList[j];
+            	if(fromtr->toName==toName){
+            		fromtr->guardList.push_back(cTemp);
+            	}
+            }
+        }
+
+    }
 
     else if(op == "br"){    
     //create the transition
@@ -2955,10 +3693,12 @@ void InstParser::setConstraint(CFG* cfg, State* &s, BasicBlock::iterator &it, st
 	    	tr2=new Transition(t2,"e"+tt2);
 	    	tr1->fromState=s;
 	    	tr1->fromName=s->name;
+	    	tr1->level=s->level+1;
 	    	tr1->toState=NULL;
 
 	    	tr2->fromState=s;
 	    	tr2->fromName=s->name;
+	    	tr2->level=s->level+1;
 	    	tr2->toState=NULL;
     	} 
     	else if (n1==1){
@@ -2970,365 +3710,816 @@ void InstParser::setConstraint(CFG* cfg, State* &s, BasicBlock::iterator &it, st
 	    	tr1=new Transition(t1,"e"+tt1);
 	    	tr1->fromState=s;
 	    	tr1->fromName=s->name;
+	    	tr1->level=s->level+1;
 	    	tr1->toState=NULL;
     	}
 
     	for(unsigned j = 0;j< n1; j ++){
-		Value* v1 = I->getOperand(j);
-	     
-		string varName = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
-		if(n1==3){//follow the cmp Instruction
-		        
-		    	cTemp1=cfg->c_tmp2;
-		    	cTemp2=cfg->c_tmp1;
+			Value* v1 = I->getOperand(j);
+		     
+			string varName = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
+			//errs()<<varName;
+			if(n1==3){//follow the cmp Instruction
+			        
+			    cTemp1=cfg->c_tmp2;
+			    cTemp2=cfg->c_tmp1;
 
-		      	if(j==1){//its the left
-		            toLabel1=func+"_"+varName;
-		            tr1->toLabel=toLabel1;
-		            State* s1 = cfg->getLabelState(toLabel1);
-		            if(s1!=NULL)
-		            {
-		                tr1->toName = s1->name;
-		                tr1->toState = s1;
-		            }
-		     	}
-			else if (j==2){
-		            toLabel2=func+"_"+varName;
-		            tr2->toLabel=toLabel2;
-		            State* s1 = cfg->getLabelState(toLabel2);
-		            if(s1!=NULL)
-		            {
-		                tr2->toName = s1->name;
-		                tr2->toState = s1;
-		            }
-		    	}
-		    	if(j==2)
-		    	{
-			    	tr1->guardList.push_back(cTemp1);
-			    	tr2->guardList.push_back(cTemp2);
-			    	s->transList.push_back(tr1);
-			   	s->transList.push_back(tr2);
-			    	cfg->transitionList.push_back(*tr1);//follow the transList
+			    if(j==1){//its the left
+			        toLabel1=func+"_"+varName;
+			        tr1->toLabel=toLabel1;
+			        State* s1 = cfg->getLabelState(toLabel1);
+			        if(s1!=NULL)
+			        {
+			            tr1->toName = s1->name;
+			            tr1->toState = s1;
+			        }
+			    }
+				else if (j==2){
+			        toLabel2=func+"_"+varName;
+			        tr2->toLabel=toLabel2;
+			        State* s1 = cfg->getLabelState(toLabel2);
+			        if(s1!=NULL)
+			        {
+			            tr2->toName = s1->name;
+			            tr2->toState = s1;
+			            s1->level = tr2->level;
+			        }
+				}
+			    if(j==2)
+			    {
+				    tr1->guardList.push_back(cTemp1);
+				    tr2->guardList.push_back(cTemp2);
+				   	s->transList.push_back(tr1);
+				    s->transList.push_back(tr2);
+				    cfg->transitionList.push_back(*tr1);//follow the transList
 			    	cfg->transitionList.push_back(*tr2);//follow the transList
-		    	}
+				}
+			}
+			else if(n1==1){//signle br
+			    pTemp1.rvar = new Variable("1",-1,NUM);
+			    pTemp2.rvar = new Variable("1",-1,NUM);
+			    cTemp1.lpvList = pTemp1;
+			    cTemp1.rpvList = pTemp2;
+			    cTemp1.op = EQ;
+			    toLabel1=func+"_"+varName;
+			    tr1->toLabel=toLabel1;
+			    State* s1 = cfg->getLabelState(toLabel1);
+			    if(s1!=NULL)
+			    {
+			        tr1->toName = s1->name;
+	                tr1->toState = s1;
+	                s1->level = tr1->level;
+			    }
+			    tr1->guardList.push_back(cTemp1);
+			    s->transList.push_back(tr1);
+			    cfg->transitionList.push_back(*tr1);//follow the transList
+			}             
 		}
-		else if(n1==1){//signle br
-		    pTemp1.rvar = new Variable("1",-1,true);
-		    pTemp2.rvar = new Variable("1",-1,true);
-		    cTemp1.lpvList = pTemp1;
-		    cTemp1.rpvList = pTemp2;
-		    cTemp1.op = EQ;
-		    toLabel1=func+"_"+varName;;
-		    tr1->toLabel=toLabel1;
-		    State* s1 = cfg->getLabelState(toLabel1);
-		    if(s1!=NULL)
-		    {
-		        tr1->toName = s1->name;
-		        tr1->toState = s1;
-		    }
-		    tr1->guardList.push_back(cTemp1);
-		    s->transList.push_back(tr1);
-		    cfg->transitionList.push_back(*tr1);//follow the transList
-		}             
-	}
 
     }
     
-    else if(op=="call"){
+	else if(op=="call"){
 		
-	Constraint cTemp;
+		Constraint cTemp;
         unsigned n1 = I->getNumOperands();
 
-        string c=func+"_"+getDesVarName(I); 
-        ParaVariable pTemp1,pTemp2;
+		string c=func+"_"+getDesVarName(I); 
+		ParaVariable pTemp1,pTemp2;
 
+		VarType type;
+		Type *Ty = I->getType();
+		if(Ty->isPointerTy())
+			type = PTR;
+		else if(Ty->isIntegerTy())
+			type = INT;
+		else if(Ty->isFloatingPointTy())
+			type = FP;
+		else if(!Ty->isVoidTy())
+			errs()<<"0.type error\n";
 
-        if(cfg->hasVariable(c))
-        	pTemp1.rvar = new Variable(c,cfg->getVariable(c)->ID,false);//%0.%1,%2,.....
-	else{
-	}
+		if(!Ty->isVoidTy()){
+			if(cfg->hasVariable(c))
+				errs()<<"0.Call error 10086: "<<c<<"\n";
+			else{
+				Variable var(c, cfg->counter_variable++, type);
+				cfg->variableList.push_back(var);
+				pTemp1.rvar = new Variable(var);
+				pTemp1.isExp=false;
+			}
+		}
 
-	const CallInst *call = dyn_cast<CallInst>(I);
-	Function *f = call->getCalledFunction();
-	if(!f) 
-                errs() << "Find a CallInst: "<< *I <<"\n" << "But can't find which function it calls.\n";
+		const CallInst *call = dyn_cast<CallInst>(I);
+		Function *f = call->getCalledFunction();
+		if(!f) 
+            errs() << "Find a CallInst: "<< *I <<"\n" << "But can't find which function it calls.\n";
 
         string funcName = f->getName();
+
 // **************************Deal with Function isDefined****************************
         if(!f->isDeclaration()) {
-		pTemp2.op=NONE;
+			pTemp2.op=NONE;
 
-		if(c==(func+"_")){
-			cfg->retVar.push_back("1");
-		}
-		else{
-			cfg->retVar.push_back(c);
-		}
+			if(Ty->isVoidTy()){
+				cfg->retVar.push_back("1");
+			}
+			else{
+				cfg->retVar.push_back(c);
+			}
 
 //**********************set to transition********************************************
-		int t;
+			int t;
 
-		map<string ,int >::iterator it=cfg->funcTime.find(funcName);
-	    	int time = 0;
-	    	if(it!=cfg->funcTime.end())
-			time = it->second+1;
-		if(time>0)
-			funcName = funcName+intToString(time);
+			map<string ,int >::iterator it=cfg->funcTime.find(funcName);
+			int time = 0;
+			if(it!=cfg->funcTime.end())
+				time = it->second+1;
+			if(time>0)
+				funcName = funcName+intToString(time);
 
-		string toLabel = funcName+"_%0";
-		t =cfg->counter_transition++;
-	    	string tt = intToString(t);
-	    	Transition *tr=new Transition(t,"e"+tt);
-	    	tr->fromState=s;
-	    	tr->fromName=s->name;
-		tr->toLabel=toLabel;
-		State* s1 = cfg->getLabelState(toLabel);
-		if(s1!=NULL)
-		{
-			tr->toName = s1->name;
-			tr->toState = s1;
-		}
-		else
-			tr->toState = NULL;
+			string toLabel = funcName+"_entry";
 
-		int i=0;
-		for (Function::const_arg_iterator it = f->arg_begin(), E = f->arg_end();
-                it != E; ++it){
-			Value* v1 = I->getOperand(i);
-			string varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
-			string varName = func+"_"+varNum;
-			
-			ParaVariable p2;
-			if(cfg->hasVariable(varName))
-		           	p2.rvar = new Variable(varName,cfg->getVariable(varName)->ID,false);		
+			t =cfg->counter_transition++;
+			string tt = intToString(t);
+			Transition *tr=new Transition(t,"e"+tt);
+			tr->fromState=s;
+			tr->fromName=s->name;
+			tr->level=s->level+1;
+			tr->toLabel=toLabel;
+			State* s1 = cfg->getLabelState(toLabel);
+			if(s1!=NULL)
+			{
+				tr->toName = s1->name;
+				tr->toState = s1;
+				s1->level = tr->level;
+			}
 			else
-				p2.rvar = new Variable(varNum,-1,true);
-			cfg->callVar.push_back(p2);
-			i++;
+				tr->toState = NULL;
+
+			if(tr->level<=bound){
+				int i=0;
+				for (Function::const_arg_iterator it = f->arg_begin(), E = f->arg_end();it != E; ++it){
+					Value* v1 = I->getOperand(i);
+					string varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
+					string varName = func+"_"+varNum;
+
+					ParaVariable p2;
+					bool isPTRExpr = false;
+					if(isa<ConstantExpr>(v1)){
+						ConstantExpr *expr = dyn_cast<ConstantExpr>(v1);
+						Instruction *EI = expr->getAsInstruction();
+						//%1=GetElementPtr %2, %3  ==>  1%=PTR 2%,3%
+						if(EI->getOpcode() == Instruction::GetElementPtr){
+							isPTRExpr = true;
+							Constraint cTemp1;
+							cTemp1.op=ASSIGN;
+							ParaVariable pt1,pt2;
+							unsigned n2 = EI->getNumOperands();
+									
+							Value* v2 = EI->getOperand(0);
+							string varNum = getVariableName(Out, v2, &TypePrinter, &Machine, TheModule);
+							string varName = func+"_"+varNum;
+							if(isa<GlobalVariable>(v2) )
+								varName = setGlobal(varNum, v2, cfg, s);
+									
+							Variable tempVar;
+							if(cfg->hasVariable(varName)){
+								Variable *var = cfg->getVariable(varName);
+								if(var->type!=PTR)
+									errs()<<"2.Call: error 10086: "<<varName<<"\n";
+								tempVar = new Variable(varName,var->ID,PTR);
+							}
+							else
+								errs()<<"3.Call.Getelementptr: error 10086\t"<<varName<<"\n";
+									
+							for(int i=0; i<(int)n2-2; i++){
+								string tempName = c+"_t"+intToString(i);
+								Variable tVar(tempName, cfg->counter_variable++, PTR);
+								cfg->variableList.push_back(tVar);
+								pt1.rvar = new Variable(tVar);
+								
+								v2 = EI->getOperand(i+2);
+								string varNum = getVariableName(Out, v2, &TypePrinter, &Machine, TheModule);
+								if(isConstantVal(v2))
+									pt2.rvar = new Variable(varNum,-1,NUM);
+								else 
+									errs()<<"4.Call: error 10086: "<<varNum<<"\n";
+										
+								pt2.lvar = new Variable(tempVar);
+								pt2.op = GETPTR;
+								pt2.isExp = true;
+								cTemp1.lpvList = pt1;
+								cTemp1.rpvList = pt2;
+								s->consList.push_back(cTemp1);
+										
+								tempVar = tVar;
+							}
+									
+							p2.rvar = new Variable(tempVar);
+						}
+						else{
+							v1 = EI->getOperand(0);
+						}
+					}
+					if(!isPTRExpr){
+						Type *Ty = v1->getType();
+						varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
+						varName = func+"_"+varNum;
+						if(!Ty->isPointerTy()){
+							if(isa<GlobalVariable>(v1)){
+			//					errs()<<"call isa<GlobalVariable>: "<<*v1<<"\n";
+								varName = setGlobal(varNum, v1, cfg, s);
+			//					errs()<<"call isa<GlobalVariable>: "<<varName<<"\n";
+								p2.rvar = new Variable(varName,cfg->getVariable(varName)->ID,PTR);
+							}	
+							else if(isConstantVal(v1))
+								p2.rvar = new Variable(varNum,-1,NUM);
+							else if(isa<ConstantPointerNull>(v1)){           
+								p2.rvar = new Variable("0",-1,PTR);
+							}
+							else if(cfg->hasVariable(varName)){
+								Variable *var = cfg->getVariable(varName);
+								p2.rvar = new Variable(var);
+							}
+							else	
+								errs()<<"5.Call: error 10086: "<<varName<<"\t"<<*v1<<"\n";
+						}
+						else{
+							if(isa<GlobalVariable>(v1)){
+			//					errs()<<"call isa<GlobalVariable>: "<<*v1<<"\n";
+								varName = setGlobal(varNum, v1, cfg, s);
+			//					errs()<<"call isa<GlobalVariable>: "<<varName<<"\n";
+								p2.rvar = new Variable(varName,cfg->getVariable(varName)->ID,PTR);
+							}	
+							else if(cfg->hasVariable(varName))
+								p2.rvar = new Variable(varName,cfg->getVariable(varName)->ID,PTR);
+							else {
+								errs()<<funcName<<"6. call error: 10086!!: "<<varName<<"\t"<<*I<<"\n";
+							}
+						}
+					}
+					cfg->callVar.push_back(p2);
+					i++;
+				}
+			}
+
+			s->transList.push_back(tr);
+			cfg->transitionList.push_back(*tr);
+			return;
+
 		}
+	// **************************Deal with Function isDefined end****************************
 
-		s->transList.push_back(tr);
-		cfg->transitionList.push_back(*tr);
-
-	}
-// **************************Deal with Function isDefined end****************************
-	else{
-		pTemp2.op = get_m_Operator(funcName);
-		pTemp2.isExp = true;
-	}
-	
+	// **************************Deal with Exit Functions(insert false constraint)****************************
+		else if(funcName == "exit"){
+			pTemp1.rvar = new Variable("1",-1,NUM);
+			pTemp2.rvar = new Variable("0",-1,NUM);
+			cTemp.op = EQ;
+			cTemp.lpvList = pTemp1;
+			cTemp.rpvList = pTemp2;
+			s->consList.push_back(cTemp);
+			return;
+		}
+	// **************************Deal with Math Functions(sin,cos,abs)****************************
+		else{
+			pTemp2.op = get_m_Operator(funcName);
+			pTemp2.isExp = true;
+		}
 
     	cTemp.lpvList = pTemp1;
     	cTemp.op=ASSIGN;
-	if(pTemp2.op==NONE){
-		return;
-	}
+		if(pTemp2.op==NONE){
+			return;
+		}
 	
         if(n1==2){
         	Value* v1 = I->getOperand(0);
-		string varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
+			string varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
 	    	string varName = func+"_"+varNum;
-            	if(cfg->hasVariable(varName))
-                    	pTemp2.rvar = new Variable(varName,cfg->getVariable(varName)->ID,false);
-		else{
-                 	pTemp2.rvar = new Variable(varNum,-1,true);
-                }
-	}
-	else if(n1==3){
+			if(isConstantVal(v1))
+				pTemp2.rvar = new Variable(varNum,-1,NUM);	
+            else if(cfg->hasVariable(varName)){
+            	Variable *var = cfg->getVariable(varName);
+                pTemp2.rvar = new Variable(var);
+            }
+			else
+				errs()<<funcName<<"8. call error: 10086!!: "<<varName<<"\t"<<*I<<"\n";
+		}
+		else if(n1==3){
         	Value* v1 = I->getOperand(1);
-		string varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
+			string varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
 	    	string varName = func+"_"+varNum;
-            	if(cfg->hasVariable(varName))
-                    	pTemp2.rvar = new Variable(varName,cfg->getVariable(varName)->ID,false);
-		else{
-                 	pTemp2.rvar = new Variable(varNum,-1,true);
-                } 
+            if(isConstantVal(v1))
+				pTemp2.rvar = new Variable(varNum,-1,NUM);	
+            else if(cfg->hasVariable(varName)){
+            	Variable *var = cfg->getVariable(varName);
+                pTemp2.rvar = new Variable(var);
+            }
+			else
+				errs()<<funcName<<"9. call error: 10086!!: "<<varName<<"\t"<<*I<<"\n";
 		
         	v1 = I->getOperand(0);
-		varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
+			varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
 	    	varName = func+"_"+varNum;
-            	if(cfg->hasVariable(varName))
-                    	pTemp2.lvar = new Variable(varName,cfg->getVariable(varName)->ID,false);
-		else{
-                 	pTemp2.lvar = new Variable(varNum,-1,true);
-                } 
+            if(isConstantVal(v1))
+				pTemp2.lvar = new Variable(varNum,-1,NUM);	
+            else if(cfg->hasVariable(varName)){
+            	Variable *var = cfg->getVariable(varName);
+                pTemp2.lvar = new Variable(var);
+            }
+			else
+				errs()<<funcName<<"8. call error: 10086!!: "<<varName<<"\t"<<*I<<"\n";
      	}
      	cTemp.rpvList = pTemp2;
      	s->consList.push_back(cTemp);
-
-
     }
 
     else if(op=="ret"){
-	if(func == "main") return;
-	string varNum;
-	unsigned n1 = I->getNumOperands();
-	if(n1<1) 
-		varNum = "";
-	else{
-		Value* v1 = I->getOperand(0);
-		varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
-	}
-	string varName = func+"_"+varNum;
+		if(func == cfg->startFunc) return;
+		unsigned n1 = I->getNumOperands();
+		Value* v1;
+		if(n1<1){
+			v1=NULL;
+		}
+		else{
+			v1 = I->getOperand(0);
+		}
 
-	int t =cfg->counter_transition++;
+		int t =cfg->counter_transition++;
     	string tt = intToString(t);
     	Transition *tr=new Transition(t,"e"+tt);
     	tr->fromState=s;
     	tr->fromName=s->name;
-	tr->toLabel=func+"_ret";
-	State* s1 = cfg->getLabelState(tr->toLabel);
-	if(s1!=NULL)
-	{
-		tr->toName = s1->name;
-		tr->toState = s1;
-	}
-	else{
-		tr->toState = NULL;
-	}
-	
-	if(cfg->retVar.empty())
-		errs()<<"1.RetInst:10086\n";
-	string ret = cfg->retVar.back();
-	if(ret!="1"&&varNum!=""){
-		Constraint cTemp1;
-		ParaVariable p1,p2;
-		if(cfg->hasVariable(ret))
-		 	p1.rvar = new Variable(ret,cfg->getVariable(ret)->ID,false);	
-		else
-		        errs()<<"2.RetInst:10086\n";
+    	tr->level=s->level+1;
+		tr->toLabel=func+"_ret";
+		State* s1 = cfg->getLabelState(tr->toLabel);
+		if(s1!=NULL)
+		{
+			tr->toName = s1->name;
+			tr->toState = s1;
+			s1->level = tr->level;
+		}
+		else{
+			tr->toState = NULL;
+		}
+		
+		if(cfg->retVar.empty())
+			errs()<<"1.RetInst:10086\n";
+		string ret = cfg->retVar.back();
+		if(ret!="1"&&v1!=NULL){
+		
+			string varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);;
+			string varName = func+"_"+varNum;
+			Constraint cTemp1;
+			ParaVariable p1,p2;
+			if(cfg->hasVariable(ret)){
+				Variable *var = cfg->getVariable(ret);
+				p1.rvar = new Variable(var);//new Variable(ret,var->ID,var->type);	
+			}
+			else
+				errs()<<"2.RetInst:10086\n";
+			
+			if(isConstantVal(v1))
+				p2.rvar = new Variable(varNum,-1,NUM);
+			else if(isa<ConstantPointerNull>(v1)){                                  
+                p2.rvar = new Variable("0",-1,PTR);
+            }
+			else if(cfg->hasVariable(varName)){
+				Variable *var = cfg->getVariable(varName);
+				p2.rvar = new Variable(var);//new Variable(varName,->ID,false);	
+			}
+			else
+				errs()<<"3.RetInst:10086 "<<varName<<"\n";
 
-		if(cfg->hasVariable(varName))
-		 	p2.rvar = new Variable(varName,cfg->getVariable(varName)->ID,false);	
-		else
-		        p2.rvar = new Variable(varNum,-1,true);
+			cTemp1.lpvList = p1;
+			cTemp1.rpvList = p2;
+			cTemp1.op=ASSIGN;
+			tr->guardList.push_back(cTemp1);
+		}
 
-		cTemp1.lpvList = p1;
-		cTemp1.rpvList = p2;
-		cTemp1.op=ASSIGN;
-		tr->guardList.push_back(cTemp1);
-	}
-
-	s->transList.push_back(tr);
-	cfg->transitionList.push_back(*tr);
+		s->transList.push_back(tr);
+		cfg->transitionList.push_back(*tr);
     }
 
     else if(op=="getelementptr"){
-	string c=func+"_"+getDesVarName(I); 
-	unsigned n1 = I->getNumOperands();
-	Value* v1 = I->getOperand(0);
-	string varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
-	string varName = func+"_"+varNum+"_0";
+		string c=func+"_"+getDesVarName(I); 
+		unsigned n1 = I->getNumOperands();
+		Value* v1 = I->getOperand(0);
+		string varName;
+		
+		Constraint cTemp;
+		ParaVariable pTemp1,pTemp2;
+		
+		if(cfg->hasVariable(c))
+			errs()<<"0.Getelementptr error 10086: "<<c<<"\n";
+		else{
+			Variable var(c, cfg->counter_variable++, PTR);
+			cfg->variableList.push_back(var);
+			pTemp1.rvar = new Variable(var);
+			pTemp1.isExp=false;
+		}
+		
+		string varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
+		/////////////////////////set global variables when used//////////////////////////////
+		if(isa<GlobalVariable>(v1)){
+			varName = setGlobal(varNum, v1, cfg, s);
+		}
+		else{
+			varName = func+"_"+varNum;
+			if(!cfg->hasVariable(varName)) 
+				errs()<<"2.Getelementptr: error 10086\t"<<varName<<"\n";
+		}
 
-	Constraint cTemp;
-        ParaVariable pTemp1,pTemp2;
-	if(cfg->hasVariable(c))
-                pTemp1.rvar = new Variable(c,cfg->getVariable(c)->ID,false);
-	else{
-                errs()<<"2.Getelementptr: error 10086\t"<<c<<"\n";
-        }
-	if(cfg->hasVariable(varName))
-		pTemp2.lvar = new Variable(varName,cfg->getVariable(varName)->ID,false);	
-	else
-		errs()<<"3.Getelementptr: error 10086\t"<<varName<<"\n";
-	v1 = I->getOperand(n1-1);
-	varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
-	varName = func+"_"+varNum;
-	if(cfg->hasVariable(varName))
-		pTemp2.rvar = new Variable(varName,cfg->getVariable(varName)->ID,false);	
-	else
-		pTemp2.rvar = new Variable(varNum,-1,true);
-	pTemp2.op = PTR;
-	pTemp2.isExp = true;
-	cTemp.lpvList = pTemp1;
-	cTemp.rpvList = pTemp2;
-	cTemp.op = ASSIGN;
-	s->consList.push_back(cTemp);
+		if(cfg->hasVariable(varName))
+			pTemp2.lvar = new Variable(varName,cfg->getVariable(varName)->ID,PTR);
+		else
+			errs()<<"3.Getelementptr: error 10086\t"<<varName<<"\n";
+		
+		v1 = I->getOperand(n1-1);
+		varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
+		varName = func+"_"+varNum;
+		if(isConstantVal(v1))
+			pTemp2.rvar = new Variable(varNum,-1,NUM);
+		else if(cfg->hasVariable(varName)){
+			Variable *var = cfg->getVariable(varName);
+			pTemp2.rvar = new Variable(var);	
+		}
+		else
+			errs()<<"4.Getelementptr: error 10086\t"<<*v1<<"\n";
+		
+		if(n1==2)
+			pTemp2.op = ADD;
+		else
+			pTemp2.op = GETPTR;	
+		pTemp2.isExp = true;
+		cTemp.lpvList = pTemp1;
+		cTemp.rpvList = pTemp2;
+		cTemp.op = ASSIGN;
+		s->consList.push_back(cTemp);
     }
     return;
 	
 }
 
-// nonlinear_bottom
-
-
-int setArrayVar(CFG* cfg, Type *Ty, int ID, string vName){
-    vector<unsigned> lvl;
-    while(const ArrayType *ATy = dyn_cast<ArrayType>(Ty)){				
-	lvl.push_back(ATy->getNumElements());
-	Ty = ATy->getElementType();
-    }
-
-    char ch = vName[vName.length()-1];
-    unsigned NumElements=1;
-    for(int i=0;i<lvl.size();i++)
-	NumElements *= lvl[i];
-    if(NumElements==1){
-	if(ch != '_' && !cfg->hasVariable(vName)){
-		Variable var(vName, ID, false);
-		cfg->variableList.push_back(var);
-		ID ++;
-	}
-    }
-    else{
-	if(ch != '_' && !cfg->hasVariable(vName)){
-		cfg->arrayMap.insert(pair<string, vector<unsigned> >(vName, lvl));
-		for(unsigned i=0;i<NumElements;i++){
-			string c = vName+"_"+intToString(i);
-			Variable var(c, ID, false);
-			cfg->variableList.push_back(var);
-			ID ++;
-		}
-	}
-    }
-    return ID;
+//**************deal with global variables****************
+string InstParser::setGlobal(string varName, Value *v1, CFG *cfg, State *s){
+		GlobalVariable *v = dyn_cast<GlobalVariable>(v1);
+		Constant *Initial = v->getInitializer();
+//		errs()<<"0:Set global: "<<*v1<<"\n";
+		if(cfg->hasVariable(varName))
+			return varName;
+		return setGlobalConstraint(varName, Initial, cfg, s);
 }
 
+//********************set initial constraints of global variables****************************************
+string InstParser::setGlobalConstraint(string name, Constant *Initial, CFG *cfg, State *s){
+		if(Initial==NULL){
+			errs()<<"0:Set global: Initial error "<<name<<"\n";
+			exit(-1);
+		}
+		Variable pvar;
+		if(!cfg->hasVariable(name)){
+			//set ptr var
+			pvar = new Variable(name, cfg->counter_variable++, PTR);
+			cfg->variableList.push_back(pvar);
+		}
+		else{
+			Variable *addrvar = cfg->getVariable(name);
+			pvar = *addrvar;
+		}			
+		string dataName = name+"_0";
+		Constraint cTemp1;
+		ParaVariable p1,p2;
+		p1.rvar = new Variable(pvar);
+		cTemp1.op = ASSIGN;
+		p2.isExp = true;
+		if(Initial->getType()->isSingleValueType()){
+//			errs()<<"1:Set global: isSingleValueType"<<name<<"\n";
+			p2.op = ALLOCA;
+			cTemp1.lpvList = p1;
+			cTemp1.rpvList = p2;
+			cfg->stateList[0].consList.push_back(cTemp1);
+			
+			if(!cfg->hasVariable(dataName)){
+				//set dataVar
+				double value;
+				VarType type;
+				Type *Ty = Initial->getType();
+				if(Ty->isPointerTy())
+					type = PTR;
+				else if(Ty->isIntegerTy())
+					type = INT;
+				else if(Ty->isFloatingPointTy())
+					type = FP;
+				else
+					errs()<<"4.type error\n";
 
-int InstParser::setVariable(CFG* cfg, const Instruction *I, int ID, string func){
-     string op = I->getOpcodeName();
-     string vName = func+"_"+getDesVarName(I);
-     if(vName.size()<=0)
-	errs()<<"alloca: error 10086, no desname\n";
-     if(op == "alloca"){
+				Variable dataVar(dataName, cfg->counter_variable++, type);
+				cfg->variableList.push_back(dataVar);
+				//dataVar = DATA
+				Constraint cTemp;
+				ParaVariable pTemp1,pTemp2;
+				cTemp.op=ASSIGN;
+				pTemp1.rvar = new Variable(dataVar);
+				if(isa<ConstantInt>(Initial)){
+					const ConstantInt *con = dyn_cast<ConstantInt>(Initial); 
+					value = con->getValue().signedRoundToDouble();
+					string num = double2string(value);
+					pTemp2.rvar = new Variable(num,-1,NUM);
+				}
+				else if(isa<ConstantFP>(Initial)){
+					const ConstantFP *con = dyn_cast<ConstantFP>(Initial); 
+					value = con->getValueAPF().convertToDouble();
+					string num = double2string(value);
+					pTemp2.rvar = new Variable(num,-1,NUM);
+				}
+				else if(isa<ConstantExpr>(Initial)){
+					ConstantExpr *expr = dyn_cast<ConstantExpr>(Initial);
+					Instruction *EI = expr->getAsInstruction();
+					if(EI->getOpcode() != Instruction::GetElementPtr)
+						errs()<<"1:Set global Warning 10086!! "<<*Initial<<"\t"<<*EI<<"\n";
+					unsigned n1 = EI->getNumOperands();
+					
+					Value* v2 = EI->getOperand(0);
+					string varNum = getVariableName(Out, v2, &TypePrinter, &Machine, TheModule);
+					string varName = varNum;
+					if(isa<GlobalVariable>(v2) )
+						varName = setGlobal(varNum, v2, cfg, s);
+							
+					Variable tempVar;
+					if(cfg->hasVariable(varName)){
+						Variable *var = cfg->getVariable(varName);
+						if(var->type!=PTR)
+							errs()<<"2.Store: error 10086: "<<varName<<"\n";
+						tempVar = new Variable(varName,var->ID,PTR);
+					}
+					else
+						errs()<<"3.Store.Getelementptr: error 10086\t"<<varName<<"\n";
+					
+					Constraint con;
+					ParaVariable pt1,pt2;
+					con.op = ASSIGN;
+					
+					//temp_i = PTR temp_i-1 v_i+2
+					for(int i=0; i<(int)n1-2; i++){
+						string tempName = dataName+"_t"+intToString(i);
+						Variable tVar(tempName, cfg->counter_variable++, PTR);
+						cfg->variableList.push_back(tVar);
+						pt1.rvar = new Variable(tVar);
+						
+						v2 = EI->getOperand(i+2);
+						string varNum = getVariableName(Out, v2, &TypePrinter, &Machine, TheModule);
+						if(isConstantVal(v2))
+							pt2.rvar = new Variable(varNum,-1,NUM);
+						else 
+							errs()<<"4.Store: error 10086: "<<varNum<<"\n";
+								
+						pt2.lvar = new Variable(tempVar);
+						pt2.op = GETPTR;
+						pt2.isExp = true;
+						con.lpvList = pt1;
+						con.rpvList = pt2;
+//						s->consList.push_back(con);
+						cfg->stateList[0].consList.push_back(con);
+								
+						tempVar = tVar;
+					}
+							
+					pTemp2.rvar = new Variable(tempVar);
+				}
+				else if(isa<ConstantPointerNull>(Initial)){
+					pTemp2.rvar = new Variable("0",-1,PTR);
+				}
+				else
+					errs()<<"1.GlobalVariable error 10086"<<*Initial<<"\n";
 
-	const AllocaInst *AI = dyn_cast<AllocaInst>(I);
-	Type *Ty = AI->getAllocatedType();
-	if(const ArrayType *ATy = dyn_cast<ArrayType>(Ty)){	
-		return setArrayVar(cfg, Ty, ID, vName);
-	}
-	else if(const StructType *STy = dyn_cast<StructType>(Ty)){
-		unsigned NumElements = STy->getNumElements();
-		for (unsigned i = 0; i < NumElements; ++i){
-			string c = vName+"_"+intToString(i);
-			Type *nTy = STy->getElementType(i);
-			if(const ArrayType *ATy = dyn_cast<ArrayType>(nTy)){	
-				ID = setArrayVar(cfg, nTy, ID, c);
-			}
-			else if(!cfg->hasVariable(c)){
-				Variable var(c, ID, false);
-				cfg->variableList.push_back(var);
-				ID ++;
+				cTemp.lpvList = pTemp1;
+				cTemp.rpvList = pTemp2;
+	
+//				s->consList.push_back(cTemp);
+				cfg->stateList[0].consList.push_back(cTemp);
+				
+				//var = store dataVar
+				p2.op = STORE;
+				p2.rvar = new Variable(dataVar);
 			}
 		}
+		else{
+			string varNum = name;
+//			errs()<<"2:Set global: isNotSingleValueType "<<name<<"\n";
+			
+			Variable dataVar;
+			if(!cfg->hasVariable(dataName)){
+				if(const ConstantArray *CA = dyn_cast<ConstantArray>(Initial)){
+					unsigned n = CA->getNumOperands();
+//					errs()<<"2.1:const ConstantArray *CA = dyn_cast<ConstantArray>(Initial)\t"<<n<<"\n";
+					for(unsigned i=0;i<n;i++){
+						string name = varNum+"_"+intToString(i);
+						Value *cv = CA->getOperand(i);
+						if(isa<UndefValue>(cv)) continue;
+						Variable var(name, cfg->counter_variable++, PTR);
+						cfg->variableList.push_back(var);
+						if(i==0)
+							dataVar = var;
+					}
+					for(unsigned i=0;i<n;i++){
+						string name = varNum+"_"+intToString(i);
+						Constant *cv = dyn_cast<Constant>(CA->getOperand(i));
+						if(isa<UndefValue>(cv)) continue;
+						setGlobalConstraint(name, cv, cfg, s);
+					}
+				}
+				else if(const ConstantStruct *CS = dyn_cast<ConstantStruct>(Initial)){		
+					unsigned n = CS->getNumOperands();
+//					errs()<<"2.1:const ConstantStruct *CS = dyn_cast<ConstantStruct>(Initial)\t"<<n<<"\n";	
+					for(unsigned i=0;i<n;i++){
+						string name = varNum+"_"+intToString(i);
+						Value *cv = CS->getOperand(i);
+						if(isa<UndefValue>(cv)) continue;
+						Variable var(name, cfg->counter_variable++, PTR);
+						cfg->variableList.push_back(var);
+						if(i==0)
+							dataVar = var;
+					}
+					for(unsigned i=0;i<n;i++){
+						string name = varNum+"_"+intToString(i);
+						Constant *cv = dyn_cast<Constant>(CS->getOperand(i));
+						if(isa<UndefValue>(cv)) continue;
+						setGlobalConstraint(name, cv, cfg, s);
+					}
+				}
+				else if(const ConstantDataArray *CA = dyn_cast<ConstantDataArray>(Initial)){
+					unsigned n = CA->getNumElements();
+//					errs()<<"2.1:const ConstantDataArray *CA = dyn_cast<ConstantDataArray>(Initial)\t"<<n<<"\n";
+					for(unsigned i=0;i<n;i++){
+						string name = varNum+"_"+intToString(i);
+						Value *cv = CA->getElementAsConstant(i);
+						if(isa<UndefValue>(cv)) continue;
+						Variable var(name, cfg->counter_variable++, PTR);
+						cfg->variableList.push_back(var);
+						if(i==0)
+							dataVar = var;
+					}
+					for(unsigned i=0;i<n;i++){
+						string name = varNum+"_"+intToString(i);
+						Constant *cv = dyn_cast<Constant>(CA->getElementAsConstant(i));
+						if(isa<UndefValue>(cv)) continue;
+						setGlobalConstraint(name, cv, cfg, s);
+					}
+				}
+				else if(const ConstantAggregateZero *CAZ = dyn_cast<ConstantAggregateZero>(Initial)){
+					unsigned n = CAZ->getNumElements();
+//					errs()<<"2.1:const ConstantAggregateZero *CAZ = dyn_cast<ConstantAggregateZero>(Initial)\t"<<n<<"\n";
+					for(unsigned i=0;i<n;i++){
+						string name = varNum+"_"+intToString(i);
+						Value *cv = CAZ->getElementValue(i);
+						if(isa<UndefValue>(cv)) continue;
+						Variable var(name, cfg->counter_variable++, PTR);
+						cfg->variableList.push_back(var);
+						if(i==0)
+							dataVar = var;
+					}
+					for(unsigned i=0;i<n;i++){
+						string name = varNum+"_"+intToString(i);
+						Constant *cv = dyn_cast<Constant>(CAZ->getElementValue(i));
+						if(isa<UndefValue>(cv)) continue;
+						setGlobalConstraint(name, cv, cfg, s);
+					}
+				}
+				else{
+					unsigned n = Initial->getNumOperands();
+//					errs()<<"2.1:Else:"<<n<<"\n";
+					for(unsigned i=0;i<n;i++){
+						string name = varNum+"_"+intToString(i);
+						Value *cv = Initial->getOperand(i);
+						if(isa<UndefValue>(cv)) continue;
+						Variable var(name, cfg->counter_variable++, PTR);
+						cfg->variableList.push_back(var);
+						if(i==0)
+							dataVar = var;
+					}
+					for(unsigned i=0;i<n;i++){
+						string name = varNum+"_"+intToString(i);
+						Constant *cv = dyn_cast<Constant>(Initial->getOperand(i));
+						if(isa<UndefValue>(cv)) continue;
+						setGlobalConstraint(name, cv, cfg, s);
+					}
+				}
+				p2.op = ADDR;
+				p2.rvar = new Variable(dataVar);
+				p2.isExp = true;
+			}
+		}
+		cTemp1.lpvList = p1;
+		cTemp1.rpvList = p2;
+//		s->consList.push_back(cTemp1);
+		cfg->stateList[0].consList.push_back(cTemp1);
+		
+		return name;
+}
+
+void InstParser::setVariable(CFG* cfg, State * s, Type *Ty, string name, bool initial){
+	Variable pvar;
+	if(!cfg->hasVariable(name)){
+			//set ptr var
+		pvar = new Variable(name, cfg->counter_variable++, PTR);
+		cfg->variableList.push_back(pvar);
 	}
 	else{
-		if(!cfg->hasVariable(vName)){
-			Variable var(vName, ID, false);
-			cfg->variableList.push_back(var);
-			ID ++;
+		Variable *addrvar = cfg->getVariable(name);
+		pvar = *addrvar;
+	}			
+	Constraint cTemp1;
+	ParaVariable p1,p2;
+	p1.rvar = new Variable(pvar);
+	cTemp1.op = ASSIGN;
+	p2.isExp = true;
+	if(Ty->isSingleValueType()){
+		p2.op = ALLOCA;
+		/*
+		if(Ty->isFloatingPointTy()||Ty->isIntegerTy()){
 		}
+		else if(Ty->isPointerTy()){
+		}
+		*/
+		if(Ty->isX86_MMXTy()){
+			errs()<<"setVariable error : isX86_MMXTy\n";
+		}
+		else if(Ty->isVectorTy()){
+			errs()<<"setVariable error : isVectorTy\n";
+		}
+		
+		VarType type;
+		if(Ty->isPointerTy())
+			type = PTR;
+		else if(Ty->isIntegerTy())
+			type = INT;
+		else if(Ty->isFloatingPointTy())
+			type = FP;
+		else
+			errs()<<"5.type error\n";
+			
+		string dataName = name+"_0";
+		int ID = cfg->counter_variable++;
+		Variable dataVar(dataName, ID, type);
+		cfg->variableList.push_back(dataVar);
+
+		cTemp1.lpvList = p1;
+		cTemp1.rpvList = p2;
+		if(initial){
+			cfg->initialCons.push_back(cTemp1);
+			cfg->mainInput.push_back(ID);
+		}
+		else
+			s->consList.push_back(cTemp1);
+		p2.rvar = new Variable(dataVar);
+		p2.op = STORE;
 	}
-    }
-    else{
-	if(vName != func+"_" && !cfg->hasVariable(vName)){
-		Variable var(vName, ID, false);
-		cfg->variableList.push_back(var);
-		ID ++;
+	else{
+		Variable dataVar;
+		if(Ty->isArrayTy()){
+			ArrayType *ATy = dyn_cast<ArrayType>(Ty);
+			unsigned n = ATy->getArrayNumElements();
+			for(unsigned i=0;i<n;i++){
+				string varName = name+"_"+intToString(i);
+				Variable var(varName, cfg->counter_variable++, PTR);
+				cfg->variableList.push_back(var);
+				if(i==0)
+					dataVar = var;
+			}
+			for(unsigned i=0;i<n;i++){
+				string varName = name+"_"+intToString(i);
+				Type *EleTy = ATy->getArrayElementType();
+					
+				setVariable(cfg, s, EleTy, varName, initial);
+			}
+		}
+		else if(Ty->isStructTy()){
+			StructType *STy = dyn_cast<StructType>(Ty);
+			unsigned n = STy->getStructNumElements();
+			for(unsigned i=0;i<n;i++){
+				string varName = name+"_"+intToString(i);
+				Variable var(varName, cfg->counter_variable++, PTR);
+				cfg->variableList.push_back(var);
+				if(i==0)
+					dataVar = var;
+			}
+			for(unsigned i=0;i<n;i++){
+				string varName = name+"_"+intToString(i);
+				Type *EleTy = STy->getStructElementType(i);
+					
+				setVariable(cfg, s, EleTy, varName, initial);
+			}
+		}
+		p2.op = ADDR;
+		p2.rvar = new Variable(dataVar);
 	}
-    }
-   
-    return ID; 
+	
+	cTemp1.lpvList = p1;
+	cTemp1.rpvList = p2;
+	if(initial)
+		cfg->initialCons.push_back(cTemp1);
+	else
+		s->consList.push_back(cTemp1);
 }
 
 
@@ -3347,3 +4538,152 @@ string InstParser::getDesVarName(const Instruction *I){
     }
     return vName;
 }
+
+// nonlinear_bottom
+
+
+
+//preprocess while generating CFG
+void InstParser::preprocess(CFG* cfg, State* &s, const Instruction* I, string func, unsigned Line, vector<int> &target){
+    string op = I->getOpcodeName();
+
+	//divided by zero
+    if(op=="sdiv"||op=="fdiv"){
+	Value* v1 = I->getOperand(1);
+	string varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
+	string varName = func+"_"+varNum;
+
+	if(cfg->hasVariable(varName)){
+		Constraint cTemp;
+		ParaVariable pTemp1,pTemp2;
+		Variable *var = cfg->getVariable(varName);
+		pTemp1.rvar = new Variable(var);
+
+        pTemp2.rvar = new Variable("0",-1,NUM);
+	    cTemp.lpvList = pTemp1;
+	    cTemp.op=EQ;
+	    cTemp.rpvList = pTemp2;
+		
+		int id = cfg->counter_state++;
+		string name = "q"+intToString(cfg->counter_q_state++);
+		State *qState = new State(false, id, name, func);
+        cfg->stateList.resize(id+1);
+
+		qState->locList.push_back(Line);
+
+	    qState->transList.clear();
+	    qState->consList.clear();
+		
+		int t =cfg->counter_transition++;
+	    Transition *temp=new Transition(t,"e"+intToString(t));
+	    temp->fromState=s;
+	   	temp->fromName=s->name;
+	   	temp->toState=qState;
+	   	temp->level=s->level+1;
+	   	qState->level=temp->level;
+	    temp->toName=name;
+	    temp->guardList.clear();
+		
+	    temp->guardList.push_back(cTemp);
+
+        cfg->stateList[qState->ID] = (*qState);
+        
+    	cfg->transitionList.push_back(*temp);
+        
+		target.push_back(qState->ID);
+        
+        cfg->stateList[s->ID] = (*s);
+        t = cfg->counter_transition++;
+        temp = new Transition(t, "e"+intToString(t));
+        temp->fromState = s;
+        temp->fromName = s->name;
+	   	temp->level=s->level+1;
+
+        id = cfg->counter_state++;
+        name = "s"+intToString(cfg->counter_s_state++);
+        s = new State(false, id, name, func);
+        cfg->stateList.resize(id+1);
+
+        temp->toState = s;
+        s->level = temp->level;
+        temp->toName = name;
+        temp->guardList.clear();
+        cfg->transitionList.push_back(*temp);
+    }
+	else
+		return;
+    }
+    else if(op=="call"){
+		//math functions exceptions
+		const CallInst *call = dyn_cast<CallInst>(I);
+		Function *f = call->getCalledFunction();
+		if(!f) 
+			errs() << "Preprocess: Find a CallInst: "<< *I <<"\n" << "But can't find which function it calls.\n";
+		string funcName = f->getName();
+		if(funcName == "sqrt"){
+		//sqrt less than zero
+			Value* v1 = I->getOperand(0);
+			string varNum = getVariableName(Out, v1, &TypePrinter, &Machine, TheModule);
+			string varName = func+"_"+varNum;
+
+			if(cfg->hasVariable(varName)){
+				Constraint cTemp;
+				ParaVariable pTemp1,pTemp2;
+				Variable *var = cfg->getVariable(varName);
+				pTemp1.rvar = new Variable(var);
+
+				pTemp2.rvar = new Variable("0",-1,NUM);
+				cTemp.lpvList = pTemp1;
+				cTemp.op=LT;
+				cTemp.rpvList = pTemp2;
+			
+				int id = cfg->counter_state++;
+				string name = "q"+intToString(cfg->counter_q_state++);
+				State *qState = new State(false, id, name, func);
+				cfg->stateList.resize(id+1);
+				qState->transList.clear();
+				qState->consList.clear();
+			
+				qState->locList.push_back(Line);
+
+				int t =cfg->counter_transition++;
+				Transition *temp=new Transition(t,"e"+intToString(t));
+				temp->fromState=s;
+				temp->fromName=s->name;
+				temp->toState=qState;
+				temp->toName=name;
+			   	temp->level=s->level+1;
+			   	qState->level=temp->level;
+				temp->guardList.clear();
+			
+				temp->guardList.push_back(cTemp);
+
+				cfg->stateList[qState->ID] = (*qState);
+				cfg->transitionList.push_back(*temp);
+				target.push_back(qState->ID);
+
+				cfg->stateList[s->ID] = (*s);
+				t = cfg->counter_transition++;
+				temp = new Transition(t, "e"+intToString(t));
+				temp->fromState = s;
+				temp->fromName = s->name;
+			
+				id = cfg->counter_state++;
+				name = "s"+intToString(cfg->counter_s_state++);
+				s = new State(false, id, name, func);
+				cfg->stateList.resize(id+1);
+
+				temp->toState = s;
+				temp->toName = name;
+			   	temp->level=s->level+1;
+			   	s->level=temp->level;
+				temp->guardList.clear();
+				cfg->transitionList.push_back(*temp);
+			}
+		}
+    }
+    else
+		return;
+}
+
+

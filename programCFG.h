@@ -15,6 +15,8 @@
 //#include "../lib/IR/AsmWriter.h"
 #include "llvm/IR/DebugInfo.h"
 #include "Verification.h"
+#include "System.h"
+
 using namespace llvm;
 using namespace std;
 struct CFGNode;
@@ -56,17 +58,17 @@ struct CFGNode{
             string  str;
             ost>>str;
            
+	    const Function* F = b->getParent()?b->getParent():nullptr;
+	    string func = F->getName();
+
             //Generate a new state
             int id = counter_state;
             name = "s"+str;
-            State* s = new State(false, id, name);
+            State* s = new State(false, id, name, func);
             raw_ostream &ROS = errs();
             formatted_raw_ostream OS(ROS);
-            global_CFG.InsertCFGState(counter_state,name);
-             
+            global_CFG.InsertCFGState(counter_state,name,func);
 	    
-	    const Function* F = b->getParent()?b->getParent():nullptr;
-	    string func = F->getName();
 	    if(func=="main" && b==F->begin()){
 		cfg->initialState=s;
 		s->isInitial=true;
@@ -76,16 +78,14 @@ struct CFGNode{
             BasicBlock::iterator it_end = b->end();
             for(BasicBlock::iterator it = b->begin(); it != it_end; it ++){
                 const Instruction* I = dyn_cast<Instruction>(it);
-//                const Function* F = I->getParent()?I->getParent()->getParent():nullptr;
-		SlotTracker SlotTable(F);
+                SlotTracker SlotTable(F);
                 const Module* M = F?F->getParent():nullptr;
                 InstParser W(OS, SlotTable, M, nullptr);
-//		errs()<<"InL:\n";W.printInstructionLine(*I);
                 //create the LabelMap
                 if(it == b->begin())
-                    W.InsertCFGLabel(cfg,b,s, func); 
+                    W.InsertCFGLabel(cfg,b,s, func, "", false); 
                 //create the variable table
-                counter_variable = W.setVariable(cfg, I, counter_variable, func);
+                //counter_variable = W.setVariable(cfg, I, counter_variable, func);
                 //create the constraint table(NOT TRANSITION)
 //                counter_state = W.setConstraint(cfg, s, I, func, counter_state);
             } 
@@ -150,15 +150,22 @@ struct CFGNode{
 
 class ProgramCFG{
     private:
+        //find target state based on line
         void initTargetFunctionList(Module &m);
         void findAllRetBlocks(Module &m);
+        //build total CFG
         void buildProgramCFG(Module &m, CFG *cfg);
-	void readFunc(string funcName, CFG *cfg, int time);
-	void readBasicblock(BasicBlock *b, CFG *cfg, int time);
+        //build function CFG
+        void readFunc(string funcName, CFG *cfg, int time);
+        //build basicBlock CFG
+        void readBasicblock(BasicBlock *b, CFG *cfg, int time);
         void createSucc(BasicBlock *v);
         void bfs(CFGNode *v);
         CFGNode* root;
         Module &M;
+    	vector<int> target;
+        //Set function arguments
+        void  setFuncVariable(const Function *F, string func, CFG* cfg, bool initial=false);
     public:
         ProgramCFG(Module &m);
         std::map<BasicBlock*, CFGNode> *nodes;
@@ -175,3 +182,4 @@ class ProgramCFG{
 
 
 #endif
+	void readGlobalVariable(Module &m, CFG *cfg);
